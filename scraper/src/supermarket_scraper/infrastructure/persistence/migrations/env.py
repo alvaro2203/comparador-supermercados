@@ -32,9 +32,21 @@ def run_migrations(connection: Connection) -> None:
 
 
 def run_online() -> None:
-    """Migrate the shared connection, or a new one opened from the application settings."""
-    shared = context.config.attributes.get("connection")
-    if isinstance(shared, Connection):
+    """Migrate the shared connection, or a new one opened from the application settings.
+
+    Raises:
+        TypeError: A shared value was given but it is not a ``Connection``. Falling
+            back to the settings would silently migrate a different database.
+    """
+    attributes = context.config.attributes
+    if "connection" in attributes:
+        shared = attributes["connection"]
+        if not isinstance(shared, Connection):
+            msg = (
+                "config.attributes['connection'] must be a SQLAlchemy Connection, "
+                f"got {type(shared).__name__}"
+            )
+            raise TypeError(msg)
         run_migrations(shared)
         return
     engine = build_engine(Settings().database_url)

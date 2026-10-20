@@ -57,8 +57,17 @@ Every migration path opens its connection through `migration_connection()` in `d
 - turns `PRAGMA foreign_keys` off, because dropping `products` with enforcement on would cascade
   and delete `price_snapshots`;
 - sets the driver's `isolation_level` to `None` and emits `BEGIN`, because pysqlite otherwise
-  autocommits each `CREATE`/`DROP` and a failing migration would leave tables behind.
+  autocommits each `CREATE`/`DROP` and a failing migration would leave tables behind;
+- runs `PRAGMA foreign_key_check` before committing and rolls the migration back if any row
+  references a missing parent, since re-enabling foreign keys does not validate existing rows.
 
-Never run migrations on a connection that did not come from `migration_connection()`.
+Never run migrations on a connection that did not come from `migration_connection()`. `env.py`
+raises `TypeError` if `config.attributes["connection"]` is set to anything but a `Connection`,
+instead of falling back to `SCRAPER_DATABASE_URL`.
+
 `upgrade_schema()` raises `SchemaMigrationError` for any failure, including a pre-migration
 database that holds only part of `BASELINE_TABLES`, and the CLI maps it to exit code `2`.
+
+The Alembic command line does not adopt a pre-migration database (no `alembic_version` table);
+`alembic upgrade head` on one fails with "table ... already exists". Run
+`supermarket-scraper init-db` on it first.

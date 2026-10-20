@@ -64,6 +64,9 @@ All paths below are under `scraper/src/supermarket_scraper/`.
 - `infrastructure/`: `http/client.py` (retrying, rate-limited `AsyncJsonClient`), `scrapers/`
   (`base.py` template method, `registry.py`, one package per chain), `persistence/` (SQLAlchemy Core).
 - `bootstrap.py`: the only place concrete classes are wired. `config.py`: typed settings from env or `.env`.
+  Exception: `infrastructure/persistence/migrations/env.py` is a developer-only second entry point.
+  From the `alembic` command line it reads `Settings` and builds its own engine; at runtime it gets
+  its connection from `upgrade_schema()`.
 - `presentation/cli.py`: argparse CLI and exit codes.
 
 Never import `infrastructure` from `domain` or `application`.

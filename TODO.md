@@ -42,19 +42,19 @@ estar resuelto **antes de crear la `0002`**.
     tablas.
   - **Arreglo:** marcarla solo si existen las seis tablas de la versión inicial. Si no, dar un error
     claro.
-- [ ] **`env.py` ignora en silencio un valor de `connection` que no sea un `Connection`.**
+- [x] **`env.py` ignora en silencio un valor de `connection` que no sea un `Connection`.**
   - **Problema:** en ese caso migraría la base de datos por defecto.
   - **Arreglo:** lanzar `TypeError` cuando la clave existe pero el valor no es un `Connection`.
-- [ ] **No se valida la integridad al terminar.**
+- [x] **No se valida la integridad al terminar.**
   - **Problema:** las migraciones corren con las foreign keys desactivadas, y al volver a activarlas
     nadie comprueba los datos.
   - **Arreglo:** ejecutar `PRAGMA foreign_key_check` antes de confirmar la transacción, y abortar si
     devuelve alguna fila.
-- [ ] **Docstring engañoso en `script.py.mako`.**
+- [x] **Docstring engañoso en `script.py.mako`.**
   - **Problema:** el `downgrade` promete "sin borrar datos", pero autogenerate lo rellena con
     `drop_column`.
   - **Arreglo:** dejar un docstring neutro.
-- [ ] **Corregir la documentación.**
+- [x] **Corregir la documentación.**
   - En `persistence.md` y el README, limitar la frase sobre las foreign keys a lo que es cierto hoy, o
     reescribirla cuando esté hecho el primer punto.
   - Avisar de que `alembic upgrade head` no adopta bases de datos antiguas: hay que lanzar

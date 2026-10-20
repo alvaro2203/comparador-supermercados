@@ -147,7 +147,13 @@ def migration_connection(engine: Engine) -> Iterator[Connection]:
       ``CREATE`` and ``DROP`` on its own, and a failing migration would leave half
       of its tables behind.
 
-    Both are restored before the connection goes back to the pool.
+    Both are restored before the connection goes back to the pool. Because
+    re-enabling foreign keys does not validate existing rows, referential
+    integrity is checked before the transaction commits.
+
+    Raises:
+        SchemaMigrationError: On SQLite, the migrated data has rows whose foreign
+            keys point nowhere; the whole transaction is rolled back.
     """
     with engine.connect() as connection:
         if connection.dialect.name != "sqlite":
@@ -157,6 +163,20 @@ def migration_connection(engine: Engine) -> Iterator[Connection]:
         with _sqlite_migration_mode(connection), connection.begin():
             connection.exec_driver_sql("BEGIN")
             yield connection
+            _ensure_sqlite_foreign_keys_hold(connection)
+
+
+def _ensure_sqlite_foreign_keys_hold(connection: Connection) -> None:
+    """Raise if any row references a parent row that does not exist."""
+    violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
+    if not violations:
+        return
+    tables = sorted({str(violation[0]) for violation in violations})
+    msg = (
+        f"Migration left {len(violations)} row(s) with broken foreign keys "
+        f"in {', '.join(tables)}; it was rolled back"
+    )
+    raise SchemaMigrationError(msg)
 
 
 @contextmanager

@@ -29,5 +29,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Revert this revision without deleting products, categories or price history."""
+    """Revert this revision."""
     ${downgrades if downgrades else "pass"}

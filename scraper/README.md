@@ -27,6 +27,10 @@ presentation (CLI) ──► application (use cases, ports) ──► domain (en
 | `presentation` | `argparse` CLI with scheduler-friendly exit codes. | bootstrap |
 | `bootstrap` | Composition root: the only place where concrete classes are wired together. | everything |
 
+There is one other entry point, for developers only: `infrastructure/persistence/migrations/env.py`,
+which Alembic loads. At runtime it receives its connection from `upgrade_schema()`. When it is run
+from the `alembic` command line, it reads `Settings` and builds its own engine outside `bootstrap`.
+
 ### Extensible scrapers: Template Method plus Registry
 
 `BaseSupermarketScraper[PageRefT, RawProductT, RawDetailT]` owns the orchestration: concurrent
@@ -174,9 +178,13 @@ Review the generated file in `migrations/versions/` before you commit it. Rules 
 * **They never delete stored data.** A downgrade that would lose data raises instead, as the
   baseline does.
 * **On SQLite, operations run in batch mode** (the table is rebuilt), with foreign keys
-  temporarily off so that rebuilding `products` cannot cascade into `price_snapshots`. This
-  applies both to `upgrade_schema()` and to the `alembic` command line, which share
+  temporarily off so that rebuilding `products` cannot cascade into `price_snapshots`. Before
+  committing, `PRAGMA foreign_key_check` must come back clean, or the migration is rolled back.
+  This applies both to `upgrade_schema()` and to the `alembic` command line, which share
   `migration_connection()`.
+* **The `alembic` command line does not adopt old databases.** On a database created before
+  migrations existed (no `alembic_version` table), `alembic upgrade head` fails with "table
+  already exists". Run `uv run supermarket-scraper init-db` on it first.
 * **Tests check the migrations against `tables.py`.** A test fails if applying them doesn't
   produce exactly the schema declared there.
 
@@ -327,7 +335,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 58 tests, ~94% branch coverage
+uv run pytest --cov         # 60 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

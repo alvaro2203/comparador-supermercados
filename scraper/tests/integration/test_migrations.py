@@ -276,3 +276,55 @@ def test_partially_created_pre_migration_database_is_refused(tmp_path: Path) -> 
 
     assert current_revision(partial) is None
     partial.dispose()
+
+
+ORPHAN_ROW_REVISION = """
+import sqlalchemy as sa
+from alembic import op
+
+revision = "0002"
+down_revision = "0001"
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.execute(
+        "INSERT INTO price_snapshots "
+        "(product_id, captured_on, captured_at, currency, amount, reference_unit, is_promotion) "
+        "VALUES (999, '2026-10-02', '2026-10-02 06:00:00', 'EUR', 9500, 'l', 0)"
+    )
+
+
+def downgrade():
+    pass
+"""
+
+
+def test_migration_that_leaves_orphan_rows_is_rolled_back(
+    engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with engine.begin() as connection:
+        insert_price_history(connection)
+    location = migrations_with_revision(tmp_path, ORPHAN_ROW_REVISION)
+    monkeypatch.setattr(database, "MIGRATIONS_LOCATION", str(location))
+
+    with pytest.raises(SchemaMigrationError, match="price_snapshots"):
+        upgrade_schema(engine)
+
+    assert current_revision(engine) == BASELINE_REVISION
+    assert count_snapshots(engine) == 1
+
+
+def test_shared_connection_of_the_wrong_type_is_refused(
+    engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fallback_database = tmp_path / "fallback.db"
+    monkeypatch.setenv("SCRAPER_DATABASE_URL", f"sqlite:///{fallback_database}")
+    config = alembic_config()
+    config.attributes["connection"] = engine
+
+    with pytest.raises(TypeError, match="Connection"):
+        command.upgrade(config, "head")
+
+    assert not fallback_database.exists()
