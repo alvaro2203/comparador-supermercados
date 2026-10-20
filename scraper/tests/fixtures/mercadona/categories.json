@@ -1,0 +1,30 @@
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 12,
+      "name": "Aceite, especias y salsas",
+      "order": 7,
+      "layout": 2,
+      "published": true,
+      "is_extended": false,
+      "categories": [
+        {"id": 112, "name": "Aceite, vinagre y sal", "order": 7, "layout": 1, "published": true, "is_extended": false},
+        {"id": 115, "name": "Especias", "order": 7, "layout": 1, "published": true, "is_extended": false}
+      ]
+    },
+    {
+      "id": 99,
+      "name": "Categoría oculta",
+      "order": 99,
+      "layout": 1,
+      "published": false,
+      "is_extended": false,
+      "categories": [
+        {"id": 999, "name": "Oculta", "order": 1, "layout": 1, "published": true, "is_extended": false}
+      ]
+    }
+  ]
+}

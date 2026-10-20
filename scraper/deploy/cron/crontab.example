@@ -1,0 +1,4 @@
+# Install with: crontab -e  (paste the lines below, adjusting the project path)
+CRON_TZ=Europe/Madrid
+PATH=/usr/local/bin:/usr/bin:/bin
+30 6 * * * /opt/supermarket-scraper/scripts/run_daily.sh

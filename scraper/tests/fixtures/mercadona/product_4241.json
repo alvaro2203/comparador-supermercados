@@ -1,0 +1,35 @@
+{
+  "id": "4241",
+  "ean": "8480000108141",
+  "slug": "aceite-oliva-virgen-extra-hacendado-botella",
+  "brand": "Hacendado",
+  "limit": 999,
+  "origin": "España",
+  "photos": [
+    {
+      "zoom": "https://prod-mercadona.imgix.net/images/4241.jpg?fit=crop&h=1600&w=1600",
+      "regular": "https://prod-mercadona.imgix.net/images/4241.jpg?fit=crop&h=600&w=600",
+      "thumbnail": "https://prod-mercadona.imgix.net/images/4241.jpg?fit=crop&h=300&w=300",
+      "perspective": 2
+    }
+  ],
+  "details": {
+    "brand": "Hacendado",
+    "origin": "<p>España</p>",
+    "suppliers": [{"name": "Proveedor S.A."}],
+    "legal_name": "Aceite de oliva virgen extra",
+    "description": "Aceite de oliva <b>virgen extra</b> &amp; afrutado",
+    "counter_info": null,
+    "danger_mentions": "",
+    "alcohol_by_volume": null,
+    "mandatory_mentions": "",
+    "production_variant": "",
+    "usage_instructions": "",
+    "storage_instructions": "Conservar en lugar fresco"
+  },
+  "nutrition_information": {
+    "allergens": "",
+    "ingredients": "Aceite de oliva virgen extra."
+  },
+  "display_name": "Aceite de oliva virgen extra Hacendado"
+}

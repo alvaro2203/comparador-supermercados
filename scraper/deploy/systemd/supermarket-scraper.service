@@ -1,0 +1,20 @@
+[Unit]
+Description=Daily supermarket catalog and price download
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=scraper
+WorkingDirectory=/opt/supermarket-scraper
+EnvironmentFile=-/opt/supermarket-scraper/.env
+Environment=SCRAPER_LOG_FORMAT=json
+ExecStart=/usr/local/bin/uv run --frozen --no-dev supermarket-scraper run
+SuccessExitStatus=1
+TimeoutStartSec=2h
+Nice=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/supermarket-scraper/data /opt/supermarket-scraper/.venv
+PrivateTmp=true

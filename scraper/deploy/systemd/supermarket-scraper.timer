@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the supermarket scraper every morning
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Europe/Madrid
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
