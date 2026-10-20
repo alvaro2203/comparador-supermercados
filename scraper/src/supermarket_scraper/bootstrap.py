@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from supermarket_scraper.application.enrich_details import EnrichDetailsUseCase, EnrichOptions
 from supermarket_scraper.application.sync_catalog import SyncCatalogUseCase, SyncOptions
 from supermarket_scraper.infrastructure.clock import SystemClock
 from supermarket_scraper.infrastructure.http.client import HttpClientConfig
@@ -47,6 +48,10 @@ class Container:
             dry_run=dry_run,
         )
         return SyncCatalogUseCase(self.uow_factory, self.clock, options)
+
+    def enrich_use_case(self, *, limit: int | None = None) -> EnrichDetailsUseCase:
+        """Build the detail backfill use case, enriching every pending product unless limited."""
+        return EnrichDetailsUseCase(self.uow_factory, self.clock, EnrichOptions(limit=limit))
 
 
 def build_container(settings: Settings) -> Container:

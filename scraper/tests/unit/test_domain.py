@@ -9,6 +9,7 @@ from supermarket_scraper.domain.entities import (
     CatalogSnapshot,
     Category,
     Product,
+    ProductDetails,
     ProductListing,
     RunStats,
     RunStatus,
@@ -17,7 +18,12 @@ from supermarket_scraper.domain.entities import (
     Supermarket,
 )
 from supermarket_scraper.domain.exceptions import InvalidEntityError
-from supermarket_scraper.domain.value_objects import MeasureUnit, Price, SupermarketCode
+from supermarket_scraper.domain.value_objects import (
+    MeasureUnit,
+    Price,
+    SupermarketCode,
+    normalize_gtin,
+)
 
 CODE = SupermarketCode("mercadona")
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
@@ -104,3 +110,33 @@ def test_snapshot_completeness() -> None:
     assert CatalogSnapshot(supermarket, (), ()).is_complete
     incomplete = CatalogSnapshot(supermarket, (), (), (ScrapeFailure("x", "y"),))
     assert not incomplete.is_complete
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("8480000108142", "08480000108142"),
+        ("80177173", "00000080177173"),
+        ("150570037606", "00150570037606"),
+        ("80432115985", "00080432115985"),
+        ("08480000108142", "08480000108142"),
+        ("8480000108141", None),
+        ("1234567", None),
+        ("123456789012345", None),
+        ("848000010814A", None),
+        (chr(0xFF18) + "480000108142", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_normalize_gtin(code: str | None, expected: str | None) -> None:
+    assert normalize_gtin(code) == expected
+
+
+def test_product_and_details_expose_their_gtin() -> None:
+    product = Product(supermarket=CODE, external_id="1", name="Leche", ean="80177173")
+    details = ProductDetails(supermarket=CODE, external_id="1", ean="8480000108141")
+
+    assert product.gtin == "00000080177173"
+    assert details.gtin is None
+    assert ProductDetails(supermarket=CODE, external_id="1").gtin is None

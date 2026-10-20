@@ -42,8 +42,8 @@ REBUILD_PRODUCTS_REVISION = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0002"
-down_revision = "0001"
+revision = "test"
+down_revision = "{head}"
 branch_labels = None
 depends_on = None
 
@@ -61,8 +61,8 @@ FAILING_REVISION = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0002"
-down_revision = "0001"
+revision = "test"
+down_revision = "{head}"
 branch_labels = None
 depends_on = None
 
@@ -71,7 +71,7 @@ def upgrade():
     op.create_table("leftover", sa.Column("id", sa.Integer, primary_key=True))
     with op.batch_alter_table("products", recreate="always") as batch:
         batch.add_column(sa.Column("nickname", sa.String(20), nullable=True))
-    raise RuntimeError("boom in revision 0002")
+    raise RuntimeError("boom in the test revision")
 
 
 def downgrade():
@@ -80,15 +80,16 @@ def downgrade():
 
 
 def migrations_with_revision(tmp_path: Path, source: str) -> Path:
-    """Copy the real migrations and append one extra revision written for the test."""
+    """Copy the real migrations and append one revision, written for the test, on top of head."""
     location = tmp_path / "migrations"
     shutil.copytree(MIGRATIONS_DIR, location, ignore=shutil.ignore_patterns("__pycache__"))
-    (location / "versions" / "v0002_test_revision.py").write_text(source, encoding="utf-8")
+    revision = source.replace("{head}", str(head_revision()))
+    (location / "versions" / "v_test_revision.py").write_text(revision, encoding="utf-8")
     return location
 
 
 def head_revision() -> str | None:
-    return ScriptDirectory.from_config(alembic_config()).get_current_head()
+    return ScriptDirectory(str(MIGRATIONS_DIR)).get_current_head()
 
 
 def current_revision(engine: Engine) -> str | None:
@@ -169,8 +170,9 @@ def test_pre_migration_database_is_adopted_without_losing_data(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     legacy = build_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
-    metadata.create_all(legacy)
+    migrate_to(legacy, BASELINE_REVISION)
     with legacy.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE alembic_version")
         insert_price_history(connection)
 
     with caplog.at_level(logging.INFO, logger=database.__name__):
@@ -200,14 +202,11 @@ def test_batch_rebuild_of_products_keeps_price_history(engine: Engine) -> None:
 def test_baseline_downgrade_is_refused_and_keeps_data(engine: Engine) -> None:
     with engine.begin() as connection:
         insert_price_history(connection)
-    config = alembic_config()
 
-    with database.migration_connection(engine) as connection:
-        config.attributes["connection"] = connection
-        with pytest.raises(NotImplementedError, match="irreversible"):
-            command.downgrade(config, "base")
+    with pytest.raises(NotImplementedError, match="irreversible"):
+        downgrade_to(engine, "base")
 
-    assert current_revision(engine) == BASELINE_REVISION
+    assert current_revision(engine) == head_revision()
     assert count_snapshots(engine) == 1
 
 
@@ -242,7 +241,7 @@ def test_alembic_command_line_rebuilds_products_without_losing_price_history(
 
     command.upgrade(config, "head")
 
-    assert current_revision(engine) == "0002"
+    assert current_revision(engine) == "test"
     assert "nickname" in {column["name"] for column in inspect(engine).get_columns("products")}
     assert count_snapshots(engine) == 1
 
@@ -255,13 +254,13 @@ def test_failed_migration_rolls_back_every_statement(
     location = migrations_with_revision(tmp_path, FAILING_REVISION)
     monkeypatch.setattr(database, "MIGRATIONS_LOCATION", str(location))
 
-    with pytest.raises(SchemaMigrationError, match="boom in revision 0002"):
+    with pytest.raises(SchemaMigrationError, match="boom in the test revision"):
         upgrade_schema(engine)
 
     tables = set(inspect(engine).get_table_names())
     assert "leftover" not in tables
     assert "_alembic_tmp_products" not in tables
-    assert current_revision(engine) == BASELINE_REVISION
+    assert current_revision(engine) == head_revision()
     assert count_snapshots(engine) == 1
     with engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
@@ -282,8 +281,8 @@ ORPHAN_ROW_REVISION = """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0002"
-down_revision = "0001"
+revision = "test"
+down_revision = "{head}"
 branch_labels = None
 depends_on = None
 
@@ -312,7 +311,7 @@ def test_migration_that_leaves_orphan_rows_is_rolled_back(
     with pytest.raises(SchemaMigrationError, match="price_snapshots"):
         upgrade_schema(engine)
 
-    assert current_revision(engine) == BASELINE_REVISION
+    assert current_revision(engine) == head_revision()
     assert count_snapshots(engine) == 1
 
 
@@ -328,3 +327,56 @@ def test_shared_connection_of_the_wrong_type_is_refused(
         command.upgrade(config, "head")
 
     assert not fallback_database.exists()
+
+
+def migrate_to(engine: Engine, revision: str) -> None:
+    config = alembic_config()
+    with database.migration_connection(engine) as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, revision)
+
+
+def downgrade_to(engine: Engine, revision: str) -> None:
+    config = alembic_config()
+    with database.migration_connection(engine) as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, revision)
+
+
+def stored_gtins(engine: Engine) -> dict[str, str | None]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(products.c.external_id, products.c.gtin))
+        return {row.external_id: row.gtin for row in rows}
+
+
+def test_gtin_migration_backfills_valid_eans_and_survives_a_round_trip(tmp_path: Path) -> None:
+    baseline = build_engine(f"sqlite:///{tmp_path / 'baseline.db'}")
+    migrate_to(baseline, BASELINE_REVISION)
+    with baseline.begin() as connection:
+        insert_price_history(connection)
+        connection.execute(
+            products.insert(),
+            [
+                {
+                    "supermarket_code": "mercadona",
+                    "external_id": external_id,
+                    "name": "Producto",
+                    "ean": ean,
+                    "selling_method": "unit",
+                    "first_seen_at": SEEN_AT,
+                    "last_seen_at": SEEN_AT,
+                }
+                for external_id, ean in (("nutella", "80177173"), ("typo", "8480000108141"))
+            ],
+        )
+
+    upgrade_schema(baseline)
+
+    expected = {"4241": None, "nutella": "00000080177173", "typo": None}
+    assert stored_gtins(baseline) == expected
+    downgrade_to(baseline, BASELINE_REVISION)
+    assert "gtin" not in {column["name"] for column in inspect(baseline).get_columns("products")}
+    upgrade_schema(baseline)
+    assert stored_gtins(baseline) == expected
+    assert count_snapshots(baseline) == 1
+    baseline.dispose()

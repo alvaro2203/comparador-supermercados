@@ -22,7 +22,9 @@ paths:
 - Domain types are supermarket-agnostic. Never add a field that only makes sense for one chain;
   map it to a generic concept (`SellingMethod`, `MeasureUnit`) or keep it inside that chain's scraper.
 - `external_id` is the chain's own identifier, always `str`. Surrogate database ids never appear here.
-- `ean` is the cross-chain matching key: digits only. Treat any change to its validation as a
+- `ean` is the code as the chain publishes it (digits only). The cross-chain matching key is its
+  `gtin` property, from `normalize_gtin`: left-padded to 14 digits, `None` if the check digit fails.
+  Migration `0002` holds a frozen copy of that function. Treat any change to either as a
   breaking change for the comparator.
 - Extend `MeasureUnit.parse` aliases instead of special-casing units in a scraper.
 

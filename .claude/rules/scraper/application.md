@@ -5,8 +5,9 @@ paths:
 
 # Application layer
 
-`SyncCatalogUseCase` orchestrates a run through two ports: `CatalogSource` (any supermarket) and
-`UnitOfWork` (any store), plus `Clock`. It must stay ignorant of which chain and which database.
+`SyncCatalogUseCase` orchestrates a run, and `EnrichDetailsUseCase` fetches product details for it
+and for the `enrich` command. Both work through two ports: `CatalogSource` (any supermarket) and
+`UnitOfWork` (any store), plus `Clock`. They must stay ignorant of which chain and which database.
 
 ## Boundaries
 

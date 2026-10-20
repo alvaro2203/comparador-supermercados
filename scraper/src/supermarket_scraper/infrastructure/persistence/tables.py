@@ -75,6 +75,7 @@ products: Final = Table(
     Column("slug", String(500), nullable=True),
     Column("brand", String(255), nullable=True),
     Column("ean", String(32), nullable=True),
+    Column("gtin", String(14), nullable=True),
     Column("packaging", String(120), nullable=True),
     Column("unit_size", ExactDecimal(), nullable=True),
     Column("size_format", String(32), nullable=True),
@@ -100,6 +101,7 @@ products: Final = Table(
     Column("delisted_at", UtcDateTime(), nullable=True),
     UniqueConstraint("supermarket_code", "external_id"),
     Index("ix_products_ean", "ean"),
+    Index("ix_products_gtin", "gtin"),
     Index("ix_products_supermarket_active", "supermarket_code", "is_active"),
 )
 

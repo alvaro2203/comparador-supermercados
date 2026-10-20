@@ -24,6 +24,8 @@ Switching SQLite -> PostgreSQL/MySQL must remain a change of `SCRAPER_DATABASE_U
   `delisted_at`. Only `product_categories` links are replaced.
 - Price snapshots are unique per `(product_id, captured_on)`; a same-day rerun overwrites that row.
 - Enrichment never erases data: brand, EAN and image use `coalesce(new, existing)`.
+  `gtin` follows `ean` through `_gtin_following_ean`: replaced whenever a new EAN is written
+  (NULL if that EAN is invalid), kept otherwise. Never write one without the other.
 - Repositories map rows to domain objects and back. Rows, `Row` mappings and SQLAlchemy types
   never leave this package.
 

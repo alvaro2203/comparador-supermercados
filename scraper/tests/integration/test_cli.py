@@ -145,3 +145,64 @@ def test_migration_failure_exits_with_failure_before_scraping(
     assert errors.count("Database migration failed") == 2
     assert "Traceback" not in errors
     assert fake_api.calls == []
+
+
+def test_enrich_backfills_details_after_a_run_without_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    assert main(["run", "mercadona", "--no-details"]) == ExitCode.OK
+    capsys.readouterr()
+
+    assert main(["enrich", "mercadona", "--limit", "1"]) == ExitCode.OK
+    first = capsys.readouterr().out
+    assert "[mercadona] SUCCEEDED details enrichment" in first
+    assert "enriched         1" in first
+
+    assert main(["enrich"]) == ExitCode.FAILED
+    rest = capsys.readouterr().out
+    assert "pending          3" in rest
+    assert "failures         3" in rest
+    assert "stopped early" in rest
+    assert "product 4749: GET /api/products/4749/ returned 404" in rest
+
+    assert main(["history", "mercadona"]) == ExitCode.OK
+    assert capsys.readouterr().out.count("succeeded") == 1
+
+
+def test_enrich_rejects_unknown_supermarkets_and_negative_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+
+    assert main(["enrich", "lidl"]) == ExitCode.USAGE
+    assert main(["enrich", "--limit", "-1"]) == ExitCode.USAGE
+    assert "--limit must be zero or positive" in capsys.readouterr().err
+    assert fake_api.calls == []
+
+
+def test_enrich_report_lists_a_bounded_number_of_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    monkeypatch.setattr(cli, "MAX_LISTED_FAILURES", 2)
+    assert main(["run", "mercadona", "--no-details"]) == ExitCode.OK
+    capsys.readouterr()
+
+    assert main(["enrich"]) == ExitCode.PARTIAL
+
+    output = capsys.readouterr().out
+    assert output.count("returned 404") == 2
+    assert "and 1 more (see the log for all of them)" in output

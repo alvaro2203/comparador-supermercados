@@ -72,7 +72,7 @@ async def test_first_run_persists_full_catalog(
         oil = connection.execute(
             select(schema.products).where(schema.products.c.external_id == "4241")
         ).one()
-    assert oil.ean == "8480000108141"
+    assert oil.ean == "8480000108142"
     assert oil.brand == "Hacendado"
     assert oil.details_fetched_at is not None
 

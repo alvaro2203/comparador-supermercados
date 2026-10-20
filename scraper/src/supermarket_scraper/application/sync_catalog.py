@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final
 
+from supermarket_scraper.application.enrich_details import EnrichDetailsUseCase, EnrichOptions
 from supermarket_scraper.domain.entities import (
     CatalogSnapshot,
     PriceObservation,
@@ -185,19 +186,14 @@ class SyncCatalogUseCase:
             return replace(stats, errors=stats.errors + 1)
 
     async def _fetch_and_store_details(self, source: CatalogSource, stats: RunStats) -> RunStats:
-        """Fetch detail pages for products never enriched before and store them."""
-        code = source.supermarket.code
-        with self._uow_factory() as uow:
-            pending = list(
-                uow.products.external_ids_missing_details(code, self._options.details_limit)
-            )
-        if not pending:
-            return stats
-        batch = await source.fetch_product_details(pending)
-        with self._uow_factory() as uow:
-            enriched = uow.products.apply_details(batch.details, self._clock.now())
-            uow.commit()
-        return replace(stats, details_enriched=enriched, errors=stats.errors + len(batch.failures))
+        """Fetch detail pages for up to ``details_limit`` products never enriched before."""
+        enrichment = EnrichDetailsUseCase(
+            self._uow_factory, self._clock, EnrichOptions(limit=self._options.details_limit)
+        )
+        report = await enrichment.execute(source)
+        return replace(
+            stats, details_enriched=report.enriched, errors=stats.errors + report.failures
+        )
 
     def _save_run(self, run: ScrapeRun) -> None:
         """Persist the final state of a run without letting audit errors mask the result."""

@@ -22,7 +22,7 @@ presentation (CLI) ──► application (use cases, ports) ──► domain (en
 | Layer | Responsibility | Depends on |
 |---|---|---|
 | `domain` | Immutable entities and value objects (`Product`, `Price`, `Category`, `ScrapeRun`…), invariants, abstract repositories and `UnitOfWork`. Pure Python: no I/O, no frameworks. | nothing |
-| `application` | `SyncCatalogUseCase`, which orchestrates a run. Defines the ports it needs: `CatalogSource` (any supermarket) and `Clock`. | domain |
+| `application` | `SyncCatalogUseCase`, which orchestrates a run, and `EnrichDetailsUseCase`, which fetches product details (the daily run reuses it). Defines the ports it needs: `CatalogSource` (any supermarket) and `Clock`. | domain |
 | `infrastructure` | Adapters: retrying, rate-limited `httpx` client; `BaseSupermarketScraper` and `MercadonaScraper`; the scraper registry; SQLAlchemy Core repositories; dialect-aware upserts; logging. | application, domain |
 | `presentation` | `argparse` CLI with scheduler-friendly exit codes. | bootstrap |
 | `bootstrap` | Composition root: the only place where concrete classes are wired together. | everything |
@@ -110,7 +110,8 @@ comparador-supermercados/          # repository root
     │   │   └── exceptions.py
     │   ├── application/
     │   │   ├── ports.py                # CatalogSource (scraper contract), Clock
-    │   │   └── sync_catalog.py         # SyncCatalogUseCase
+    │   │   ├── sync_catalog.py         # SyncCatalogUseCase
+    │   │   └── enrich_details.py       # EnrichDetailsUseCase (detail backfill)
     │   ├── infrastructure/
     │   │   ├── http/client.py          # AsyncJsonClient (retries, pacing, concurrency)
     │   │   ├── scrapers/
@@ -144,13 +145,16 @@ comparador-supermercados/          # repository root
 |---|---|
 | `supermarkets` | One row per chain (`code` PK, e.g. `mercadona`). |
 | `categories` | Full tree per chain (`external_id`, `parent_external_id`, `level`, `is_active`). |
-| `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens). |
+| `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens) and `gtin`. |
 | `product_categories` | Many-to-many: a product can appear under several categories. |
 | `price_snapshots` | **Price history**, one row per product per day: shelf price, reference price per kg/l/unit, previous price, promotion flag, VAT. |
 | `scrape_runs` | Audit log of every execution with counters and errors. |
 
-`ean` is indexed because it is the natural key for matching the same product across chains in
-the comparator.
+`ean` keeps the code exactly as the chain publishes it. `gtin` is the same code left-padded to 14
+digits (`normalize_gtin` in `domain/value_objects.py`), so an EAN-8, a UPC-A with or without its
+leading zero and an EAN-13 compare equal. It is NULL when there is no EAN or the EAN fails its
+check digit, so `ean IS NOT NULL AND gtin IS NULL` lists invalid codes. `gtin` is indexed: it is
+the key for matching the same product across chains in the comparator.
 
 #### Migrations
 
@@ -202,6 +206,7 @@ copy .env.example .env                    # optional: every value has a sane def
 uv run supermarket-scraper init-db        # creates data\supermarkets.db
 uv run supermarket-scraper run --dry-run  # full scrape, validates everything, writes nothing
 uv run supermarket-scraper run            # real run
+uv run supermarket-scraper enrich         # optional: fetch every EAN now instead of 500 per run
 uv run supermarket-scraper history mercadona
 ```
 
@@ -212,6 +217,7 @@ uv run supermarket-scraper history mercadona
 | `init-db` | Create the schema or apply pending migrations (idempotent; `run` also does this automatically). |
 | `list` | List registered supermarkets. |
 | `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. |
+| `enrich [CODE ...] [--limit N]` | Fetch details (EAN, brand, ingredients) for every product never enriched, or at most N per chain. Commits every 100 products, so an interrupted backfill resumes where it stopped; stops if a whole chunk fails. Prints the reason for each failed product (up to 20; every one goes to the log as `Detail enrichment failure`). Not recorded in `scrape_runs`. |
 | `history CODE [--limit N]` | Show the latest runs and their counters. |
 
 Exit codes: `0` success, `1` partial (some pages or details failed, data stored), `2` failed
@@ -227,11 +233,11 @@ list. The most important ones:
 |---|---|---|
 | `SCRAPER_DATABASE_URL` | `sqlite:///data/supermarkets.db` | Any SQLAlchemy URL. |
 | `SCRAPER_TIMEZONE` | `Europe/Madrid` | Decides which calendar day a snapshot belongs to. |
-| `SCRAPER_FETCH_DETAILS` / `SCRAPER_DETAILS_LIMIT` | `true` / `500` | EAN and brand enrichment, for never-enriched products only, at most N per run. The whole Mercadona catalog is enriched over the first ~10 days, then only new arrivals. |
+| `SCRAPER_FETCH_DETAILS` / `SCRAPER_DETAILS_LIMIT` | `true` / `500` | EAN and brand enrichment, for never-enriched products only, at most N per run. The whole Mercadona catalog is enriched over the first ~10 days, then only new arrivals. `enrich` does the backlog in one go (~3,300 products, about 15 minutes at the default pacing). |
 | `SCRAPER_HTTP_MAX_CONCURRENCY` / `SCRAPER_HTTP_MIN_INTERVAL_SECONDS` | `4` / `0.25` | Politeness. Keep them conservative. |
 | `SCRAPER_MAX_DELIST_RATIO` | `0.20` | Safety net described above. |
 | `SCRAPER_LOG_FORMAT` | `text` | `json` for log aggregators. |
-| `MERCADONA_WAREHOUSE` | `mad1` | Prices are regional (`mad1` Madrid, `vlc1` Valencia, `bcn1` Barcelona…). |
+| `MERCADONA_WAREHOUSE` | `mad1` | Prices are regional (`mad1` Madrid, `vlc1` Valencia, `bcn1` Barcelona…). The project tracks Madrid only. The warehouse is not stored with each price, so changing it on an existing database silently mixes regions in the history: start a new database instead. |
 
 ---
 
@@ -335,7 +341,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 60 tests, ~94% branch coverage
+uv run pytest --cov         # 84 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

@@ -4,7 +4,7 @@ from collections import defaultdict
 from itertools import batched
 from typing import TYPE_CHECKING, Final, override
 
-from sqlalchemy import Table, and_, bindparam, delete, func, insert, select, update
+from sqlalchemy import Table, and_, bindparam, case, delete, func, insert, select, update
 
 from supermarket_scraper.domain.entities import RunStats, RunStatus, ScrapeRun, Supermarket
 from supermarket_scraper.domain.repositories import (
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from decimal import Decimal
 
     from sqlalchemy import Connection
+    from sqlalchemy.sql.elements import ColumnElement
 
     from supermarket_scraper.domain.entities import (
         Category,
@@ -266,6 +267,7 @@ class SqlProductRepository(ProductRepository):
             )
             .values(
                 ean=func.coalesce(bindparam("b_ean", type_=table.c.ean.type), table.c.ean),
+                gtin=_gtin_following_ean(table),
                 brand=func.coalesce(bindparam("b_brand", type_=table.c.brand.type), table.c.brand),
                 origin=bindparam("b_origin"),
                 legal_name=bindparam("b_legal_name"),
@@ -283,6 +285,7 @@ class SqlProductRepository(ProductRepository):
                 "b_supermarket": str(item.supermarket),
                 "b_external_id": item.external_id,
                 "b_ean": item.ean,
+                "b_gtin": item.gtin,
                 "b_brand": item.brand,
                 "b_origin": item.origin,
                 "b_legal_name": item.legal_name,
@@ -307,6 +310,7 @@ class SqlProductRepository(ProductRepository):
                 "b_external_id": product.external_id,
                 "b_brand": product.brand,
                 "b_ean": product.ean,
+                "b_gtin": product.gtin,
             }
             for product in items
             if product.brand is not None or product.ean is not None
@@ -323,6 +327,7 @@ class SqlProductRepository(ProductRepository):
             .values(
                 brand=func.coalesce(bindparam("b_brand", type_=table.c.brand.type), table.c.brand),
                 ean=func.coalesce(bindparam("b_ean", type_=table.c.ean.type), table.c.ean),
+                gtin=_gtin_following_ean(table),
             )
         )
         self._connection.execute(statement, parameters)
@@ -515,6 +520,18 @@ def _product_row(product: Product, seen_at: datetime) -> Row:
         "last_seen_at": seen_at,
         "delisted_at": None,
     }
+
+
+def _gtin_following_ean(table: Table) -> ColumnElement[str | None]:
+    """Keep ``gtin`` in step with ``ean``: replace it whenever a new EAN is written, else keep it.
+
+    The ``ean`` column is coalesced, so a missing EAN never erases a known one. The
+    GTIN must follow the same rule, including becoming NULL when the new EAN is invalid.
+    """
+    return case(
+        (bindparam("b_ean", type_=table.c.ean.type).is_not(None), bindparam("b_gtin")),
+        else_=table.c.gtin,
+    )
 
 
 def _external_id_map(

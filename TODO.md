@@ -68,28 +68,57 @@ estar resuelto **antes de crear la `0002`**.
     distintas (01:33 y 20:27, hora de Madrid). El 18 de octubre fue la primera carga.
   - **Hacer:** registrar la tarea con `scripts/register_windows_task.ps1` para que corra a las 06:30,
     después de que Mercadona actualice los precios.
-- [ ] **Completar los EAN cuanto antes.**
+  - **Aplazado:** se hará con GitHub Actions cuando el scraper esté pulido.
+- [x] **Completar los EAN cuanto antes.**
   - **Situación:** solo 1.000 de 4.296 productos (23 %) tienen EAN, marca y detalles, porque
     `SCRAPER_DETAILS_LIMIT=500` limita la descarga por ejecución. A ese ritmo se tardan unas 9
     ejecuciones, y mientras tanto no se puede cruzar casi nada entre cadenas.
   - **Hacer:** un comando de relleno puntual, por ejemplo `enrich --all`, que descargue los ~3.300
     restantes sin saltarse los límites de cortesía. Con 0,25 s entre peticiones son unos 15 minutos.
     Otra opción es subir el límite solo durante unos días.
-- [ ] **Normalizar los EAN.**
+  - **Hecho:** comando `uv run supermarket-scraper enrich [CODE ...] [--limit N]`. Confirma cada
+    100 productos (si se corta, la siguiente ejecución sigue donde lo dejó) y se para si falla un
+    lote entero. `run` usa el mismo código para sus 500 diarios.
+  - **Resultado (21 oct):** 3.282 de 3.283 en 14 minutos. 4.280 de 4.281 productos activos (99,98 %)
+    tienen EAN y `gtin`; todos los EAN son válidos. El que falta es el producto `8300` («Pintalabios
+    Creamy Deliplus 219 marrón chocolate»): su ficha devuelve **404** aunque sigue en el catálogo.
+  - **Hecho:** cada fallo de detalle se escribe en el log (`Detail enrichment failure`, con
+    `scope` y `reason`) y `enrich` imprime los motivos (hasta 20). Antes no quedaba rastro de ellos.
+- [x] **Normalizar los EAN.**
   - **Situación:** 996 EAN tienen 13 dígitos. Nutella y Heineken traen 8 dígitos, que es un EAN-8
     válido. El gnocchi Hacendado (12 dígitos) y el tequila Olmeca (11) parecen haber perdido ceros por
     la izquierda.
   - **Hacer:** guardar una forma normalizada (GTIN-14, rellenando con ceros por la izquierda) en una
     columna nueva, con su migración, y conservar el valor original. Validar el dígito de control y
     marcar los códigos que no lo cumplan.
-- [ ] **Elegir la región de precios.**
+  - **Hecho:** columna `products.gtin` (migración `0002`, con relleno de los EAN existentes) y
+    `normalize_gtin` en el dominio. `gtin` es NULL si el EAN falla el dígito de control, así que
+    `ean IS NOT NULL AND gtin IS NULL` lista los inválidos. Comprobado sobre una copia de la base de
+    datos: los 1.000 EAN actuales son válidos, también los de 8, 11 y 12 dígitos (no estaban
+    corruptos: eran EAN-8 y UPC sin el cero inicial).
+- [x] **Elegir la región de precios.**
   - **Situación:** los precios de Mercadona dependen del almacén (`MERCADONA_WAREHOUSE`, por defecto
     `mad1`).
   - **Hacer:** decidir qué región o regiones interesan antes de acumular meses de histórico. Si son
     varias, el almacén tiene que formar parte de la clave del precio, con cambio de esquema incluido.
+  - **Decidido:** solo Madrid (`mad1`). Sin cambio de esquema. Documentado en README, CLAUDE.md y
+    `.env.example`, con el aviso de que cambiar el almacén en una base de datos existente mezcla
+    regiones en el histórico.
 
 ## P2 · Calidad de los datos
 
+- [ ] **EAN compartidos por varios productos de una misma cadena.**
+  - **Situación:** 13 EAN aparecen en 2 productos cada uno (26 en total). Son panes de la panadería:
+    la pieza entera y su versión rebanada, con ids como `9638.1` y `9638.2`. El EAN no identifica un
+    producto único dentro de Mercadona.
+  - **Hacer:** comprobar si pasa solo con el pan o también en otras categorías. Decidir cómo trata el
+    comparador un `gtin` con varios productos (devolver todos, o elegir por nombre y formato) y
+    dejarlo documentado antes de cruzar con la segunda cadena.
+- [ ] **Productos activos cuya ficha devuelve 404.**
+  - **Situación:** el `8300` está en el catálogo pero su ficha no existe. Cada `run` lo vuelve a
+    pedir entre sus 500 diarios, y `enrich` también.
+  - **Hacer:** decidir qué hacer con los productos sin ficha (marcarlos, o dejar de reintentarlos
+    durante unos días). Mientras haya pocos, no es urgente.
 - [ ] **Productos sustituidos por otro identificador.**
   - **Situación:** la «Papilla 8 cereales con galleta María Nestlé» se retiró con el id `35602` y
     reapareció con el id `18497` y otra imagen. El histórico de precios queda partido en dos productos.

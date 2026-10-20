@@ -3,9 +3,10 @@
 Price comparator for Spanish supermarkets. Only the **scraper** exists so far, in `scraper/`: a daily
 downloader that walks each chain's catalog and stores one price snapshot per product per day. A REST
 API and a comparator UI are planned. The API will reuse `domain` and `infrastructure/persistence`
-from the scraper, and will match the same product across chains by `ean`.
+from the scraper, and will match the same product across chains by `gtin` (the EAN normalized to 14 digits).
 
 Mercadona is the only integration. It uses the unofficial JSON API behind `tienda.mercadona.es`.
+Prices are tracked for the Madrid warehouse (`MERCADONA_WAREHOUSE=mad1`) only, by decision.
 Details are in [scraper/README.md](scraper/README.md). Read it before architectural changes. This
 file only holds what you need to work without re-deriving it.
 
@@ -42,11 +43,13 @@ uv run supermarket-scraper init-db            # create or migrate the schema (ru
 uv run supermarket-scraper list               # registered chains
 uv run supermarket-scraper run --dry-run      # full scrape, writes nothing
 uv run supermarket-scraper run [CODE ...] [--details|--no-details]
+uv run supermarket-scraper enrich [CODE ...] [--limit N]   # backfill EAN/details (real API)
 uv run supermarket-scraper history mercadona [--limit N]
 ```
 
-`run` without `--dry-run` hits the real Mercadona API (~150 requests) and writes to
-`scraper/data/supermarkets.db`. Do not run it unless asked. Tests never touch the network.
+`run` without `--dry-run` hits the real Mercadona API (~150 requests, plus up to 500 details) and
+`enrich` makes one request per pending product (~3,300 on a fresh database). Both write to
+`scraper/data/supermarkets.db`. Do not run either unless asked. Tests never touch the network.
 
 Exit codes: `0` ok, `1` partial (data stored), `2` failed, `64` usage or config error.
 
@@ -60,7 +63,8 @@ bootstrap.py (composition root) -> infrastructure (http, scrapers, sql) -> appli
 All paths below are under `scraper/src/supermarket_scraper/`.
 
 - `domain/`: immutable entities and value objects, abstract repositories, `UnitOfWork`. Pure Python, no I/O.
-- `application/`: `SyncCatalogUseCase` and the ports `CatalogSource` and `Clock`.
+- `application/`: `SyncCatalogUseCase`, `EnrichDetailsUseCase` (which the sync reuses for details)
+  and the ports `CatalogSource` and `Clock`.
 - `infrastructure/`: `http/client.py` (retrying, rate-limited `AsyncJsonClient`), `scrapers/`
   (`base.py` template method, `registry.py`, one package per chain), `persistence/` (SQLAlchemy Core).
 - `bootstrap.py`: the only place concrete classes are wired. `config.py`: typed settings from env or `.env`.

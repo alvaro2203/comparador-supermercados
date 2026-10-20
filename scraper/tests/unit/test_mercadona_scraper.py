@@ -98,7 +98,7 @@ async def test_fetch_product_details_cleans_html_and_isolates_missing(
     assert len(batch.details) == 1
     assert len(batch.failures) == 1
     detail = batch.details[0]
-    assert detail.ean == "8480000108141"
+    assert detail.ean == "8480000108142"
     assert detail.brand == "Hacendado"
     assert detail.origin == "España"
     assert detail.description == "Aceite de oliva virgen extra & afrutado"

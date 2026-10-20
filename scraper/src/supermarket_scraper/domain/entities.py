@@ -7,7 +7,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from supermarket_scraper.domain.exceptions import InvalidEntityError
-from supermarket_scraper.domain.value_objects import Price, SellingMethod, SupermarketCode
+from supermarket_scraper.domain.value_objects import (
+    Price,
+    SellingMethod,
+    SupermarketCode,
+    normalize_gtin,
+)
 
 if TYPE_CHECKING:
     from datetime import date, datetime
@@ -102,6 +107,11 @@ class Product:
             msg = f"EAN must be numeric, got {self.ean!r}"
             raise InvalidEntityError(msg)
 
+    @property
+    def gtin(self) -> str | None:
+        """Return the EAN as a 14-digit GTIN, or ``None`` if it is missing or invalid."""
+        return normalize_gtin(self.ean)
+
 
 @dataclass(frozen=True, slots=True)
 class ProductListing:
@@ -125,6 +135,11 @@ class ProductDetails:
     ingredients: str | None = None
     allergens: str | None = None
     image_url: str | None = None
+
+    @property
+    def gtin(self) -> str | None:
+        """Return the EAN as a 14-digit GTIN, or ``None`` if it is missing or invalid."""
+        return normalize_gtin(self.ean)
 
 
 @dataclass(frozen=True, slots=True)

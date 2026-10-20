@@ -22,11 +22,14 @@ from supermarket_scraper.infrastructure.persistence.database import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
+    from supermarket_scraper.application.enrich_details import EnrichReport
     from supermarket_scraper.application.sync_catalog import SyncReport
 
 logger: Final = logging.getLogger("supermarket_scraper.cli")
+
+MAX_LISTED_FAILURES: Final = 20
 
 
 class ExitCode(IntEnum):
@@ -76,6 +79,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip fetching product details.",
     )
 
+    enrich = commands.add_parser(
+        "enrich",
+        help="Fetch details (EAN, brand, ingredients) for every product still missing them.",
+    )
+    enrich.add_argument(
+        "supermarkets",
+        nargs="*",
+        metavar="SUPERMARKET",
+        help="Supermarket codes to enrich (default: all registered).",
+    )
+    enrich.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Enrich at most N products per supermarket (default: all pending).",
+    )
+
     history = commands.add_parser("history", help="Show the latest runs of a supermarket.")
     history.add_argument("supermarket", metavar="SUPERMARKET")
     history.add_argument("--limit", type=int, default=10)
@@ -118,6 +138,8 @@ def _execute(container: Container, args: argparse.Namespace) -> int:
         return ExitCode.OK
     if command == "history":
         return _history(container, args.supermarket, args.limit)
+    if command == "enrich":
+        return asyncio.run(_enrich(container, args.supermarkets, args.limit))
     supermarkets: list[str] = args.supermarkets
     dry_run: bool = args.dry_run
     fetch_details: bool | None = args.fetch_details
@@ -128,13 +150,7 @@ async def _run(
     container: Container, codes: Sequence[str], *, dry_run: bool, details: bool | None
 ) -> int:
     """Scrape the requested supermarkets one after another and aggregate the exit code."""
-    selected = list(codes) or list(container.registry.codes())
-    for code in selected:
-        if code not in container.registry.codes():
-            msg = (
-                f"Unknown supermarket {code!r}. Available: {', '.join(container.registry.codes())}"
-            )
-            raise UnknownSupermarketError(msg)
+    selected = _select_supermarkets(container, codes)
     if not dry_run:
         upgrade_schema(container.engine)
     use_case = container.sync_use_case(dry_run=dry_run, fetch_details=details)
@@ -144,10 +160,43 @@ async def _run(
             reports.append(await use_case.execute(source))
     for report in reports:
         _print_report(report)
-    statuses = {report.run.status for report in reports}
-    if RunStatus.FAILED in statuses:
+    return _exit_code(report.run.status for report in reports)
+
+
+async def _enrich(container: Container, codes: Sequence[str], limit: int | None) -> int:
+    """Backfill product details for the requested supermarkets and aggregate the exit code."""
+    if limit is not None and limit < 0:
+        sys.stderr.write("--limit must be zero or positive\n")
+        return ExitCode.USAGE
+    selected = _select_supermarkets(container, codes)
+    upgrade_schema(container.engine)
+    use_case = container.enrich_use_case(limit=limit)
+    reports: list[EnrichReport] = []
+    for code in selected:
+        async with container.registry.create(code, container.scraper_context) as source:
+            reports.append(await use_case.execute(source))
+    for report in reports:
+        _print_enrich_report(report)
+    return _exit_code(report.status for report in reports)
+
+
+def _select_supermarkets(container: Container, codes: Sequence[str]) -> list[str]:
+    """Return the requested codes, or every registered one, rejecting unknown codes."""
+    available = container.registry.codes()
+    selected = list(codes) or list(available)
+    for code in selected:
+        if code not in available:
+            msg = f"Unknown supermarket {code!r}. Available: {', '.join(available)}"
+            raise UnknownSupermarketError(msg)
+    return selected
+
+
+def _exit_code(statuses: Iterable[RunStatus]) -> ExitCode:
+    """Map the outcomes of several supermarkets to the worst matching exit code."""
+    seen = set(statuses)
+    if RunStatus.FAILED in seen:
         return ExitCode.FAILED
-    if RunStatus.PARTIAL in statuses:
+    if RunStatus.PARTIAL in seen:
         return ExitCode.PARTIAL
     return ExitCode.OK
 
@@ -193,6 +242,25 @@ def _print_report(report: SyncReport) -> None:
     ]
     if run.error_message:
         lines.append(f"  error            {run.error_message}")
+    sys.stdout.write("\n".join(lines) + "\n")
+
+
+def _print_enrich_report(report: EnrichReport) -> None:
+    """Write a one-block human summary of a detail enrichment to stdout."""
+    lines = [
+        f"[{report.supermarket}] {report.status.value.upper()} details enrichment",
+        f"  pending          {report.pending}",
+        f"  enriched         {report.enriched}",
+        f"  failures         {report.failures}",
+    ]
+    if report.stopped_early:
+        lines.append("  stopped early    a whole chunk failed; run enrich again later")
+    lines.extend(
+        f"  - {failure.scope}: {failure.reason}" for failure in report.reasons[:MAX_LISTED_FAILURES]
+    )
+    unlisted = len(report.reasons) - MAX_LISTED_FAILURES
+    if unlisted > 0:
+        lines.append(f"  ... and {unlisted} more (see the log for all of them)")
     sys.stdout.write("\n".join(lines) + "\n")
 
 

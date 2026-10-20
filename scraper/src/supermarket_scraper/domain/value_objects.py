@@ -12,6 +12,26 @@ _SUPERMARKET_CODE: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 _CURRENCY: Final = re.compile(r"^[A-Z]{3}$")
 _ZERO: Final = Decimal(0)
 _HUNDRED: Final = Decimal(100)
+_GTIN_CANDIDATE: Final = re.compile(r"^[0-9]{8,14}$")
+GTIN_LENGTH: Final = 14
+
+
+def normalize_gtin(code: str | None) -> str | None:
+    """Return a barcode as a 14-digit GTIN, or ``None`` if it is not a valid one.
+
+    EAN-8, UPC-A (12 digits, often published without its leading zero), EAN-13
+    and GTIN-14 are one numbering scheme of different widths: left-padding with
+    zeros gives every code the same 14-digit form, so the same product matches
+    across chains however each one formats it. Leading zeros do not change the
+    check digit, which is verified so that a mistyped code never matches an
+    unrelated product.
+    """
+    if code is None or not _GTIN_CANDIDATE.fullmatch(code):
+        return None
+    gtin = code.zfill(GTIN_LENGTH)
+    *body, check = (int(digit) for digit in gtin)
+    weighted = sum(digit * (3 if position % 2 == 0 else 1) for position, digit in enumerate(body))
+    return gtin if (10 - weighted % 10) % 10 == check else None
 
 
 class MeasureUnit(StrEnum):
