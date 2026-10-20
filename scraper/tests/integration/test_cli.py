@@ -4,6 +4,8 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from supermarket_scraper.bootstrap import Container, build_container
+from supermarket_scraper.infrastructure.persistence.database import build_engine
+from supermarket_scraper.infrastructure.persistence.tables import supermarkets
 from supermarket_scraper.presentation import cli
 from supermarket_scraper.presentation.cli import ExitCode, main
 from tests.conftest import BASE_URL
@@ -122,3 +124,24 @@ def test_unreachable_source_exits_with_failure(
 
     assert main(["run", "mercadona"]) == ExitCode.FAILED
     assert "FAILED" in capsys.readouterr().out
+
+
+def test_migration_failure_exits_with_failure_before_scraping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    partial = build_engine(f"sqlite:///{tmp_path / 'cli.db'}")
+    supermarkets.create(partial)
+    partial.dispose()
+
+    assert main(["init-db"]) == ExitCode.FAILED
+    assert main(["run", "mercadona"]) == ExitCode.FAILED
+
+    errors = capsys.readouterr().err
+    assert errors.count("Database migration failed") == 2
+    assert "Traceback" not in errors
+    assert fake_api.calls == []

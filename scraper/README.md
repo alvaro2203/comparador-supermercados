@@ -154,7 +154,11 @@ The schema is versioned with [Alembic](https://alembic.sqlalchemy.org/). The cur
 is stored in the `alembic_version` table. `init-db`, `run` and `history` call `upgrade_schema()`,
 which applies any pending migration before doing anything else, so a deployment only needs the new
 code. A database created before migrations existed is detected and stamped at the baseline
-revision `0001`. Its tables and data are kept as they are.
+revision `0001`. Its tables and data are kept as they are. If it holds only some of the six baseline
+tables, it is refused with an error instead of being stamped.
+
+Each upgrade runs in a single transaction. If a migration fails, every statement it ran is rolled
+back, the database stays at its previous revision, and the command exits with `2`.
 
 To change the schema, edit `tables.py` and then generate a migration from `scraper/`. Use a scratch
 database, not `data/supermarkets.db`:
@@ -170,7 +174,9 @@ Review the generated file in `migrations/versions/` before you commit it. Rules 
 * **They never delete stored data.** A downgrade that would lose data raises instead, as the
   baseline does.
 * **On SQLite, operations run in batch mode** (the table is rebuilt), with foreign keys
-  temporarily off so that rebuilding `products` cannot cascade into `price_snapshots`.
+  temporarily off so that rebuilding `products` cannot cascade into `price_snapshots`. This
+  applies both to `upgrade_schema()` and to the `alembic` command line, which share
+  `migration_connection()`.
 * **Tests check the migrations against `tables.py`.** A test fails if applying them doesn't
   produce exactly the schema declared there.
 
@@ -200,8 +206,9 @@ uv run supermarket-scraper history mercadona
 | `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. |
 | `history CODE [--limit N]` | Show the latest runs and their counters. |
 
-Exit codes: `0` success, `1` partial (some pages or details failed, data stored), `2` failed,
-`64` usage or configuration error. Schedulers and monitors can alert on anything other than `0`.
+Exit codes: `0` success, `1` partial (some pages or details failed, data stored), `2` failed
+(including a failed schema migration, in which case nothing is scraped), `64` usage or
+configuration error. Schedulers and monitors can alert on anything other than `0`.
 
 ### Configuration
 
@@ -320,7 +327,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 54 tests, ~94% branch coverage
+uv run pytest --cov         # 58 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

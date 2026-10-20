@@ -51,6 +51,14 @@ When you add or change a column:
    `tables.py`. Add an integration test for any data transformation the migration performs.
 
 SQLite specifics: `env.py` renders operations in batch mode, which rebuilds a table to alter it.
-`upgrade_schema()` turns `PRAGMA foreign_keys` off while migrating, because dropping `products`
-with enforcement on would cascade and delete `price_snapshots`. Run migrations only through
-`upgrade_schema()` or the Alembic command line, never by hand with foreign keys on.
+Every migration path opens its connection through `migration_connection()` in `database.py`
+(`upgrade_schema()` and the standalone branch of `env.py` both do). On SQLite it:
+
+- turns `PRAGMA foreign_keys` off, because dropping `products` with enforcement on would cascade
+  and delete `price_snapshots`;
+- sets the driver's `isolation_level` to `None` and emits `BEGIN`, because pysqlite otherwise
+  autocommits each `CREATE`/`DROP` and a failing migration would leave tables behind.
+
+Never run migrations on a connection that did not come from `migration_connection()`.
+`upgrade_schema()` raises `SchemaMigrationError` for any failure, including a pre-migration
+database that holds only part of `BASELINE_TABLES`, and the CLI maps it to exit code `2`.

@@ -12,7 +12,10 @@ from alembic import context
 from sqlalchemy import Connection
 
 from supermarket_scraper.config import Settings
-from supermarket_scraper.infrastructure.persistence.database import build_engine
+from supermarket_scraper.infrastructure.persistence.database import (
+    build_engine,
+    migration_connection,
+)
 from supermarket_scraper.infrastructure.persistence.tables import metadata
 
 
@@ -36,7 +39,7 @@ def run_online() -> None:
         return
     engine = build_engine(Settings().database_url)
     try:
-        with engine.begin() as connection:
+        with migration_connection(engine) as connection:
             run_migrations(connection)
     finally:
         engine.dispose()

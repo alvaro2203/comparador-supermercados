@@ -17,7 +17,7 @@ Prioridades:
 La base de datos actual no corre peligro mientras solo exista la migración `0001`. Todo esto tiene que
 estar resuelto **antes de crear la `0002`**.
 
-- [ ] **`alembic upgrade` desde la terminal puede borrar el histórico de precios.**
+- [x] **`alembic upgrade` desde la terminal puede borrar el histórico de precios.**
   - **Problema:** la rama de `migrations/env.py` que se usa cuando no se le pasa conexión migra con las
     foreign keys activadas. En SQLite, una migración en modo batch sobre `products` hace `DROP TABLE`, y
     el `ON DELETE CASCADE` vacía `price_snapshots`. El revisor lo reprodujo: quedaron 0 precios. Sin
@@ -25,19 +25,19 @@ estar resuelto **antes de crear la `0002`**.
   - **Arreglo:** que `env.py` use el mismo `_migration_connection` que `upgrade_schema()`. Añadir un
     test que pase por esa rama con una migración que reconstruya `products` y compruebe que los precios
     siguen ahí.
-- [ ] **Las migraciones no son atómicas en SQLite.**
+- [x] **Las migraciones no son atómicas en SQLite.**
   - **Problema:** el driver `pysqlite` no abre la transacción antes de un `CREATE` o un `DROP`. Una
     migración que falla a medias deja tablas creadas, y todas las ejecuciones siguientes fallan con
     "table already exists".
   - **Arreglo:** en la conexión de migración, poner `isolation_level = None` y emitir `BEGIN` a mano.
     Añadir un test que compruebe que una migración fallida no deja tablas nuevas.
-- [ ] **Un fallo de migración sale con código 1 ("partial") y con traceback.**
+- [x] **Un fallo de migración sale con código 1 ("partial") y con traceback.**
   - **Problema:** systemd trata el código 1 como éxito (`SuccessExitStatus=1`), así que el fallo
     pasaría desapercibido a diario.
   - **Arreglo:** que el CLI capture `SQLAlchemyError` y `alembic.util.CommandError` alrededor de
     `upgrade_schema`, muestre el error en una línea y devuelva `ExitCode.FAILED` (2). Añadir un test en
     `test_cli.py`.
-- [ ] **La adopción de una base de datos antigua solo comprueba la tabla `supermarkets`.**
+- [x] **La adopción de una base de datos antigua solo comprueba la tabla `supermarkets`.**
   - **Problema:** una base de datos creada a medias quedaría marcada como `0001` aunque le falten
     tablas.
   - **Arreglo:** marcarla solo si existen las seis tablas de la versión inicial. Si no, dar un error

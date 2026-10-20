@@ -16,7 +16,10 @@ from supermarket_scraper.domain.entities import RunStatus
 from supermarket_scraper.domain.exceptions import DomainError, UnknownSupermarketError
 from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.logging_setup import configure_logging
-from supermarket_scraper.infrastructure.persistence.database import upgrade_schema
+from supermarket_scraper.infrastructure.persistence.database import (
+    SchemaMigrationError,
+    upgrade_schema,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -91,25 +94,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(settings.log_level, settings.log_format)
     container = build_container(settings)
     try:
-        command: str = args.command
-        if command == "init-db":
-            upgrade_schema(container.engine)
-            sys.stdout.write("Database schema is up to date.\n")
-            return ExitCode.OK
-        if command == "list":
-            sys.stdout.write("\n".join(container.registry.codes()) + "\n")
-            return ExitCode.OK
-        if command == "history":
-            return _history(container, args.supermarket, args.limit)
-        supermarkets: list[str] = args.supermarkets
-        dry_run: bool = args.dry_run
-        fetch_details: bool | None = args.fetch_details
-        return asyncio.run(_run(container, supermarkets, dry_run=dry_run, details=fetch_details))
+        return _execute(container, args)
     except DomainError as exc:
         sys.stderr.write(f"{exc}\n")
         return ExitCode.USAGE
+    except SchemaMigrationError as exc:
+        logger.debug("Database migration failed", exc_info=exc)
+        sys.stderr.write(f"Database migration failed: {exc}\n")
+        return ExitCode.FAILED
     finally:
         container.engine.dispose()
+
+
+def _execute(container: Container, args: argparse.Namespace) -> int:
+    """Dispatch the parsed command and return its exit code."""
+    command: str = args.command
+    if command == "init-db":
+        upgrade_schema(container.engine)
+        sys.stdout.write("Database schema is up to date.\n")
+        return ExitCode.OK
+    if command == "list":
+        sys.stdout.write("\n".join(container.registry.codes()) + "\n")
+        return ExitCode.OK
+    if command == "history":
+        return _history(container, args.supermarket, args.limit)
+    supermarkets: list[str] = args.supermarkets
+    dry_run: bool = args.dry_run
+    fetch_details: bool | None = args.fetch_details
+    return asyncio.run(_run(container, supermarkets, dry_run=dry_run, details=fetch_details))
 
 
 async def _run(
