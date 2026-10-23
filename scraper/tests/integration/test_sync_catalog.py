@@ -9,10 +9,12 @@ from supermarket_scraper.application.sync_catalog import SyncCatalogUseCase, Syn
 from supermarket_scraper.domain.entities import RunStatus
 from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.persistence import tables as schema
+from supermarket_scraper.infrastructure.persistence.repositories import SqlProductRepository
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    import pytest
     from sqlalchemy import Engine, Table
 
     from supermarket_scraper.application.ports import CatalogSource, DetailsBatch
@@ -264,4 +266,64 @@ async def test_enrichment_crash_keeps_committed_catalog(
     assert report.run.stats.new_products == 4
     assert report.run.stats.errors == 1
     assert count(engine, schema.products) == 4
+    assert count(engine, schema.price_snapshots) == 4
+
+
+async def test_daily_run_links_an_article_relisted_under_a_new_id(
+    make_scraper: Callable[[], MercadonaScraper],
+    uow_factory: Callable[[], UnitOfWork],
+    clock: FixedClock,
+    engine: Engine,
+    fake_api: FakeApi,
+) -> None:
+    template = cast("dict[str, object]", fake_api.responses["/api/products/4241/"])
+    eans = {"4241": "8480000108142", "4749": "80177173", "34008": "87120158", "15061": None}
+    for external_id, ean in {**eans, "99999": "87120158"}.items():
+        fake_api.responses[f"/api/products/{external_id}/"] = {
+            **template,
+            "id": external_id,
+            "ean": ean,
+        }
+    use_case = SyncCatalogUseCase(uow_factory, clock, SyncOptions(max_delist_ratio=Decimal("0.5")))
+    async with make_scraper() as source:
+        await use_case.execute(source)
+
+    page = cast("Page", fake_api.responses["/api/categories/112/"])
+    relisted = {**page["categories"][1]["products"].pop(), "id": "99999"}
+    page["categories"][1]["products"].append(relisted)
+    clock.advance()
+    async with make_scraper() as source:
+        report = await use_case.execute(source)
+
+    assert report.run.status is RunStatus.SUCCEEDED
+    assert report.run.stats.delisted_products == 1
+    products = schema.products
+    successor = products.alias("successor")
+    statement = (
+        select(successor.c.external_id)
+        .join(products, products.c.replaced_by_product_id == successor.c.id)
+        .where(products.c.external_id == "34008")
+    )
+    with engine.connect() as connection:
+        assert connection.execute(statement).scalar_one() == "99999"
+
+
+async def test_successor_linking_crash_keeps_the_run_partial(
+    make_scraper: Callable[[], MercadonaScraper],
+    uow_factory: Callable[[], UnitOfWork],
+    clock: FixedClock,
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(self: object, supermarket: object) -> int:
+        msg = "boom while linking successors"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(SqlProductRepository, "link_successors", explode)
+    use_case = SyncCatalogUseCase(uow_factory, clock, SyncOptions(fetch_details=False))
+    async with make_scraper() as source:
+        report = await use_case.execute(source)
+
+    assert report.run.status is RunStatus.PARTIAL
+    assert report.run.stats.errors == 1
     assert count(engine, schema.price_snapshots) == 4
