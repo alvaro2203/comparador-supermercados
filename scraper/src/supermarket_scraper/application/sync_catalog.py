@@ -155,6 +155,7 @@ class SyncCatalogUseCase:
             new_products=len(upsert.new_external_ids),
             delisted_products=delisted,
             price_changes=prices.changed,
+            price_change_kinds=prices.kinds,
         )
 
     def _can_delist(self, snapshot: CatalogSnapshot, active_before: int, seen: int) -> bool:

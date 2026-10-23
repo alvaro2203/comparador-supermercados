@@ -201,16 +201,21 @@ class MercadonaScraper(
             thumbnail_url=raw.thumbnail,
             share_url=raw.share_url,
             is_available=raw.published and raw.unavailable_from is None,
-            is_new_arrival=pricing.is_new,
+            is_new_arrival=raw.is_new_arrival,
         )
         is_promotion = pricing.price_decreased or (
             pricing.previous_unit_price is not None
             and pricing.previous_unit_price > pricing.unit_price
         )
+        reference_quantity, reference_unit = MeasureUnit.parse_quantity(pricing.reference_format)
         price = Price(
             amount=pricing.unit_price,
-            reference_amount=pricing.reference_price,
-            reference_unit=MeasureUnit.parse(pricing.reference_format),
+            reference_amount=(
+                pricing.reference_price / reference_quantity
+                if pricing.reference_price is not None
+                else None
+            ),
+            reference_unit=reference_unit,
             previous_amount=pricing.previous_unit_price if is_promotion else None,
             bulk_amount=pricing.bulk_price,
             vat_rate=pricing.iva,

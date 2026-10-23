@@ -93,6 +93,7 @@ class ListedProduct(MercadonaModel):
     slug: OptionalText = None
     packaging: OptionalText = None
     published: bool = True
+    is_new_arrival: bool
     share_url: OptionalText = None
     thumbnail: OptionalText = None
     unavailable_from: OptionalText = None

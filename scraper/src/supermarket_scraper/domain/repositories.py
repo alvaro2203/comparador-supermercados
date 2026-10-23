@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
     from supermarket_scraper.domain.entities import (
         Category,
+        PriceChangeCounts,
         PriceObservation,
         Product,
         ProductDetails,
@@ -34,7 +35,12 @@ class PriceRecordResult:
     """Outcome of recording a batch of daily price observations."""
 
     recorded: int
-    changed: int
+    kinds: PriceChangeCounts
+
+    @property
+    def changed(self) -> int:
+        """Return how many products changed price versus their previous observation."""
+        return self.kinds.total
 
 
 class SupermarketRepository(ABC):

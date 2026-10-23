@@ -2,23 +2,42 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from supermarket_scraper.domain.exceptions import InvalidEntityError
 from supermarket_scraper.domain.value_objects import (
     Price,
+    PriceChangeKind,
     SellingMethod,
     SupermarketCode,
     normalize_gtin,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from datetime import date, datetime
-    from decimal import Decimal
 
 _COUNTRY_CODE: Final = re.compile(r"^[A-Z]{2}$")
+
+
+_SMALLER_UNITS: Final[dict[str, tuple[str, Decimal]]] = {
+    "kg": ("g", Decimal(1000)),
+    "l": ("ml", Decimal(1000)),
+}
+
+
+def _quantity(amount: Decimal, size_format: str | None) -> str:
+    """Write a size the way a Spanish shelf label does: ``25 g``, ``1,5 l``, ``36 ud``."""
+    unit = size_format or ""
+    if unit in _SMALLER_UNITS and amount < 1:
+        unit, factor = _SMALLER_UNITS[unit]
+        amount *= factor
+    number = format(amount.normalize(), "f").replace(".", ",")
+    return f"{number} {unit}".strip()
 
 
 def _require_text(value: str, label: str) -> None:
@@ -81,6 +100,26 @@ class PackagingInfo:
     selling_method: SellingMethod = SellingMethod.UNKNOWN
     is_approximate_size: bool = False
 
+    def describe(self) -> str:
+        """Describe the presentation: ``Garrafa 5 l``, ``Pack-6 6 x 1,5 l``, ``Paquete 26 ud``...
+
+        Several products of a chain often share a name and differ only here, so any
+        listing must show it next to the name.
+        """
+        units = self.total_units if self.total_units and self.total_units > 1 else None
+        if self.is_pack and units and self.pack_size:
+            size = f"{units} x {_quantity(self.pack_size, self.size_format)}"
+        elif units and self.size_format == "ud" and self.unit_size == 1:
+            size = f"{units} ud"
+        elif self.unit_size:
+            size = _quantity(self.unit_size, self.size_format)
+            size = f"{size}, {units} ud" if units else size
+        else:
+            size = ""
+        if size and self.is_approximate_size:
+            size = f"aprox. {size}"
+        return " ".join(part for part in (self.packaging, size) if part)
+
 
 @dataclass(frozen=True, slots=True)
 class Product:
@@ -111,6 +150,12 @@ class Product:
     def gtin(self) -> str | None:
         """Return the EAN as a 14-digit GTIN, or ``None`` if it is missing or invalid."""
         return normalize_gtin(self.ean)
+
+    @property
+    def label(self) -> str:
+        """Return the name followed by the presentation, the way listings must show a product."""
+        presentation = self.packaging.describe()
+        return f"{self.name} ({presentation})" if presentation else self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,8 +250,38 @@ class RunStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PriceChangeCounts:
+    """How many products changed price on a day, by kind of change."""
+
+    increased: int = 0
+    decreased: int = 0
+    promotions_started: int = 0
+    promotions_ended: int = 0
+
+    @classmethod
+    def tally(cls, kinds: Iterable[PriceChangeKind]) -> PriceChangeCounts:
+        """Count each kind of change in ``kinds``."""
+        counter = Counter(kinds)
+        return cls(
+            increased=counter[PriceChangeKind.INCREASED],
+            decreased=counter[PriceChangeKind.DECREASED],
+            promotions_started=counter[PriceChangeKind.PROMOTION_STARTED],
+            promotions_ended=counter[PriceChangeKind.PROMOTION_ENDED],
+        )
+
+    @property
+    def total(self) -> int:
+        """Return how many changes there were of any kind."""
+        return self.increased + self.decreased + self.promotions_started + self.promotions_ended
+
+
+@dataclass(frozen=True, slots=True)
 class RunStats:
-    """Counters describing what a scrape run changed in the catalog."""
+    """Counters describing what a scrape run changed in the catalog.
+
+    ``price_change_kinds`` breaks ``price_changes`` down by kind. It is ``None`` for
+    runs recorded before the breakdown existed, which never had it.
+    """
 
     categories: int = 0
     products: int = 0
@@ -215,6 +290,7 @@ class RunStats:
     price_changes: int = 0
     details_enriched: int = 0
     errors: int = 0
+    price_change_kinds: PriceChangeCounts | None = None
 
 
 @dataclass(frozen=True, slots=True)

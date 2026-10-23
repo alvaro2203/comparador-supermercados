@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from supermarket_scraper.application.enrich_details import EnrichReport
     from supermarket_scraper.application.sync_catalog import SyncReport
+    from supermarket_scraper.domain.entities import PriceChangeCounts
 
 logger: Final = logging.getLogger("supermarket_scraper.cli")
 
@@ -211,13 +212,15 @@ def _history(container: Container, code: str, limit: int) -> int:
         return ExitCode.OK
     header = (
         f"{'started (UTC)':<19} {'status':<10} {'products':>8} {'new':>6} "
-        f"{'delisted':>8} {'changes':>8} {'errors':>6}"
+        f"{'delisted':>8} {'changes':>8} {'up':>5} {'down':>5} {'promo+':>6} {'promo-':>6} "
+        f"{'errors':>6}"
     )
     lines = [header, "-" * len(header)]
     lines.extend(
         f"{run.started_at:%Y-%m-%d %H:%M:%S} {run.status.value:<10} {run.stats.products:>8} "
         f"{run.stats.new_products:>6} {run.stats.delisted_products:>8} "
-        f"{run.stats.price_changes:>8} {run.stats.errors:>6}"
+        f"{run.stats.price_changes:>8} {_breakdown_columns(run.stats.price_change_kinds)} "
+        f"{run.stats.errors:>6}"
         for run in runs
     )
     sys.stdout.write("\n".join(lines) + "\n")
@@ -237,12 +240,35 @@ def _print_report(report: SyncReport) -> None:
         f"  new products     {stats.new_products}",
         f"  delisted         {stats.delisted_products}",
         f"  price changes    {stats.price_changes}",
+        *_breakdown_lines(stats.price_change_kinds),
         f"  details enriched {stats.details_enriched}",
         f"  errors           {stats.errors}",
     ]
     if run.error_message:
         lines.append(f"  error            {run.error_message}")
     sys.stdout.write("\n".join(lines) + "\n")
+
+
+def _breakdown_columns(kinds: PriceChangeCounts | None) -> str:
+    """Render the price change breakdown as history columns, dashes when not classified."""
+    if kinds is None:
+        return f"{'-':>5} {'-':>5} {'-':>6} {'-':>6}"
+    return (
+        f"{kinds.increased:>5} {kinds.decreased:>5} "
+        f"{kinds.promotions_started:>6} {kinds.promotions_ended:>6}"
+    )
+
+
+def _breakdown_lines(kinds: PriceChangeCounts | None) -> list[str]:
+    """Render the price change breakdown under the run report's total, if there is one."""
+    if kinds is None:
+        return []
+    return [
+        f"    increases      {kinds.increased}",
+        f"    decreases      {kinds.decreased}",
+        f"    promo started  {kinds.promotions_started}",
+        f"    promo ended    {kinds.promotions_ended}",
+    ]
 
 
 def _print_enrich_report(report: EnrichReport) -> None:

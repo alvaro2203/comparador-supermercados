@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING, Final, override
 
 from sqlalchemy import Table, and_, bindparam, case, delete, func, insert, select, update
 
-from supermarket_scraper.domain.entities import RunStats, RunStatus, ScrapeRun, Supermarket
+from supermarket_scraper.domain.entities import (
+    PriceChangeCounts,
+    RunStats,
+    RunStatus,
+    ScrapeRun,
+    Supermarket,
+)
 from supermarket_scraper.domain.repositories import (
     CategoryRepository,
     PriceRecordResult,
@@ -16,14 +22,13 @@ from supermarket_scraper.domain.repositories import (
     ScrapeRunRepository,
     SupermarketRepository,
 )
-from supermarket_scraper.domain.value_objects import SupermarketCode
+from supermarket_scraper.domain.value_objects import Price, SupermarketCode
 from supermarket_scraper.infrastructure.persistence import tables as schema
 from supermarket_scraper.infrastructure.persistence.upsert import upsert
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
     from datetime import date, datetime
-    from decimal import Decimal
 
     from sqlalchemy import Connection
     from sqlalchemy.sql.elements import ColumnElement
@@ -34,6 +39,7 @@ if TYPE_CHECKING:
         Product,
         ProductDetails,
     )
+    from supermarket_scraper.domain.value_objects import PriceChangeKind
     from supermarket_scraper.infrastructure.persistence.upsert import Row
 
 IN_CLAUSE_CHUNK: Final = 500
@@ -400,14 +406,14 @@ class SqlPriceRepository(PriceRepository):
 
     @override
     def record(self, observations: Sequence[PriceObservation]) -> PriceRecordResult:
-        """Upsert one snapshot per product and day and count changes versus the prior day."""
+        """Upsert one snapshot per product and day and classify changes versus the prior day."""
         grouped: defaultdict[tuple[SupermarketCode, date], list[PriceObservation]] = defaultdict(
             list
         )
         for observation in observations:
             grouped[observation.supermarket, observation.captured_on].append(observation)
         recorded = 0
-        changed = 0
+        kinds: list[PriceChangeKind] = []
         for (supermarket, day), batch in grouped.items():
             product_ids = _external_id_map(self._connection, schema.products, supermarket)
             previous = self._previous_prices(supermarket, day)
@@ -418,8 +424,9 @@ class SqlPriceRepository(PriceRepository):
                     continue
                 price = observation.price
                 before = previous.get(product_id)
-                if before is not None and before != (price.amount, price.is_promotion):
-                    changed += 1
+                kind = price.change_from(before) if before is not None else None
+                if kind is not None:
+                    kinds.append(kind)
                 rows.append(
                     {
                         "product_id": product_id,
@@ -443,11 +450,9 @@ class SqlPriceRepository(PriceRepository):
                 update_columns=_PRICE_COLUMNS,
             )
             recorded += len(rows)
-        return PriceRecordResult(recorded=recorded, changed=changed)
+        return PriceRecordResult(recorded=recorded, kinds=PriceChangeCounts.tally(kinds))
 
-    def _previous_prices(
-        self, supermarket: SupermarketCode, day: date
-    ) -> dict[int, tuple[Decimal, bool]]:
+    def _previous_prices(self, supermarket: SupermarketCode, day: date) -> dict[int, Price]:
         """Return the latest shelf price before ``day`` for every product of a supermarket."""
         prices = schema.price_snapshots
         products = schema.products
@@ -458,7 +463,9 @@ class SqlPriceRepository(PriceRepository):
             .group_by(prices.c.product_id)
             .subquery()
         )
-        statement = select(prices.c.product_id, prices.c.amount, prices.c.is_promotion).join(
+        statement = select(
+            prices.c.product_id, prices.c.currency, prices.c.amount, prices.c.is_promotion
+        ).join(
             latest,
             and_(
                 prices.c.product_id == latest.c.product_id,
@@ -466,7 +473,9 @@ class SqlPriceRepository(PriceRepository):
             ),
         )
         return {
-            row.product_id: (row.amount, bool(row.is_promotion))
+            row.product_id: Price(
+                amount=row.amount, currency=row.currency, is_promotion=bool(row.is_promotion)
+            )
             for row in self._connection.execute(statement)
         }
 
@@ -492,6 +501,7 @@ class SqlScrapeRunRepository(ScrapeRunRepository):
             "new_products": run.stats.new_products,
             "delisted_products": run.stats.delisted_products,
             "price_changes": run.stats.price_changes,
+            **_price_change_kind_columns(run.stats.price_change_kinds),
             "details_enriched": run.stats.details_enriched,
             "errors_count": run.stats.errors,
             "error_message": run.error_message,
@@ -527,6 +537,12 @@ class SqlScrapeRunRepository(ScrapeRunRepository):
                     new_products=row.new_products,
                     delisted_products=row.delisted_products,
                     price_changes=row.price_changes,
+                    price_change_kinds=_price_change_kinds(
+                        row.price_increases,
+                        row.price_decreases,
+                        row.promotions_started,
+                        row.promotions_ended,
+                    ),
                     details_enriched=row.details_enriched,
                     errors=row.errors_count,
                 ),
@@ -562,6 +578,35 @@ def _product_row(product: Product, seen_at: datetime) -> Row:
         "delisted_at": None,
         "replaced_by_product_id": None,
     }
+
+
+def _price_change_kind_columns(kinds: PriceChangeCounts | None) -> Row:
+    """Spread the price change breakdown over its ``scrape_runs`` columns (NULL if unknown)."""
+    return {
+        "price_increases": kinds.increased if kinds else None,
+        "price_decreases": kinds.decreased if kinds else None,
+        "promotions_started": kinds.promotions_started if kinds else None,
+        "promotions_ended": kinds.promotions_ended if kinds else None,
+    }
+
+
+def _price_change_kinds(
+    increased: int | None,
+    decreased: int | None,
+    promotions_started: int | None,
+    promotions_ended: int | None,
+) -> PriceChangeCounts | None:
+    """Rebuild the breakdown of a run, or ``None`` for runs recorded before it existed."""
+    if increased is None or decreased is None or promotions_started is None:
+        return None
+    if promotions_ended is None:
+        return None
+    return PriceChangeCounts(
+        increased=increased,
+        decreased=decreased,
+        promotions_started=promotions_started,
+        promotions_ended=promotions_ended,
+    )
 
 
 def _gtin_following_ean(table: Table) -> ColumnElement[str | None]:

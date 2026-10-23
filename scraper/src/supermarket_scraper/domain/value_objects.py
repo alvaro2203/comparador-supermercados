@@ -11,6 +11,7 @@ from supermarket_scraper.domain.exceptions import InvalidEntityError
 _SUPERMARKET_CODE: Final = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 _CURRENCY: Final = re.compile(r"^[A-Z]{3}$")
 _ZERO: Final = Decimal(0)
+_ONE: Final = Decimal(1)
 _HUNDRED: Final = Decimal(100)
 _GTIN_CANDIDATE: Final = re.compile(r"^[0-9]{8,14}$")
 GTIN_LENGTH: Final = 14
@@ -52,6 +53,30 @@ class MeasureUnit(StrEnum):
         token = raw.strip().lower().rstrip(".")
         return _UNIT_ALIASES.get(token, cls.UNKNOWN)
 
+    @classmethod
+    def parse_quantity(cls, raw: str | None) -> tuple[Decimal, MeasureUnit]:
+        """Split a reference format such as ``100 g`` into a quantity of a base unit.
+
+        ``100 g`` is ``(0.1, KILOGRAM)``, ``75 cl`` is ``(0.75, LITRE)`` and ``12 ud``
+        is ``(12, UNIT)``. Dividing a reference price by the quantity gives a price per
+        kilogram, litre, unit, dozen or metre, comparable across products and chains
+        whatever size each one quotes. Anything unrecognised is ``(1, UNKNOWN)``.
+        """
+        match = _REFERENCE_FORMAT.fullmatch(raw.strip().lower()) if raw else None
+        if match is None:
+            return _ONE, cls.UNKNOWN
+        amount, token = match.groups()
+        quantity = Decimal(amount.replace(",", ".")) if amount else _ONE
+        token = token.rstrip(".")
+        if token in _SUB_UNITS:
+            unit, factor = _SUB_UNITS[token]
+            quantity *= factor
+        else:
+            unit = _UNIT_ALIASES.get(token, cls.UNKNOWN)
+        if unit is cls.UNKNOWN or quantity <= _ZERO:
+            return _ONE, cls.UNKNOWN
+        return quantity.normalize(), unit
+
 
 _UNIT_ALIASES: Final[dict[str, MeasureUnit]] = {
     "kg": MeasureUnit.KILOGRAM,
@@ -69,6 +94,29 @@ _UNIT_ALIASES: Final[dict[str, MeasureUnit]] = {
     "m": MeasureUnit.METRE,
     "metro": MeasureUnit.METRE,
 }
+
+_SUB_UNITS: Final[dict[str, tuple[MeasureUnit, Decimal]]] = {
+    "g": (MeasureUnit.KILOGRAM, Decimal("0.001")),
+    "gr": (MeasureUnit.KILOGRAM, Decimal("0.001")),
+    "gramo": (MeasureUnit.KILOGRAM, Decimal("0.001")),
+    "ml": (MeasureUnit.LITRE, Decimal("0.001")),
+    "cl": (MeasureUnit.LITRE, Decimal("0.01")),
+    "cm": (MeasureUnit.METRE, Decimal("0.01")),
+}
+_REFERENCE_FORMAT: Final = re.compile(r"(?:([0-9]+(?:[.,][0-9]+)?)\s*)?([a-z]+\.?)")
+
+
+class PriceChangeKind(StrEnum):
+    """Why the shelf price of a product differs from its previous observation.
+
+    Entering or leaving a promotion is told apart from a change of the regular
+    price, so a temporary discount is never mistaken for a price cut.
+    """
+
+    INCREASED = "increased"
+    DECREASED = "decreased"
+    PROMOTION_STARTED = "promotion_started"
+    PROMOTION_ENDED = "promotion_ended"
 
 
 class SellingMethod(StrEnum):
@@ -134,6 +182,22 @@ class Price:
             return None
         ratio = (self.previous_amount - self.amount) / self.previous_amount
         return (ratio * _HUNDRED).quantize(Decimal("0.01"))
+
+    def change_from(self, previous: Price) -> PriceChangeKind | None:
+        """Classify how this price differs from ``previous``, or ``None`` if it does not.
+
+        A promotion starting or ending takes precedence over the amount. Otherwise
+        the direction of the amount decides, also for a promotion whose price moved.
+        """
+        if self.same_shelf_price(previous):
+            return None
+        if self.is_promotion and not previous.is_promotion:
+            return PriceChangeKind.PROMOTION_STARTED
+        if previous.is_promotion and not self.is_promotion:
+            return PriceChangeKind.PROMOTION_ENDED
+        if self.amount > previous.amount:
+            return PriceChangeKind.INCREASED
+        return PriceChangeKind.DECREASED
 
     def same_shelf_price(self, other: Price) -> bool:
         """Tell whether two observations carry the same price the customer would pay."""
