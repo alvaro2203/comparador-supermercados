@@ -276,6 +276,32 @@ def test_price_change_counts_tally_every_kind() -> None:
             ),
             "Aceite (Caja 240 ml, 12 ud)",
         ),
+        (
+            PackagingInfo(
+                packaging="Botella",
+                unit_size=Decimal(3),
+                size_format="l",
+                total_units=50,
+                unit_name="lavados",
+            ),
+            "Aceite (Botella 3 l, 50 lavados)",
+        ),
+        (
+            PackagingInfo(
+                packaging="Caja",
+                unit_size=Decimal(1),
+                size_format="ud",
+                total_units=40,
+                unit_name="pastillas",
+            ),
+            "Aceite (Caja 40 pastillas)",
+        ),
+        (
+            PackagingInfo(
+                unit_size=Decimal("0.004"), size_format="kg", total_units=1, unit_name="barras"
+            ),
+            "Aceite (4 g)",
+        ),
         (PackagingInfo(packaging="Caja"), "Aceite (Caja)"),
         (PackagingInfo(), "Aceite"),
     ],

@@ -89,7 +89,11 @@ class Category:
 
 @dataclass(frozen=True, slots=True)
 class PackagingInfo:
-    """Size and format information about how a product is packaged and sold."""
+    """Size and format information about how a product is packaged and sold.
+
+    ``unit_name`` names what ``total_units`` counts (``lavados``, ``pastillas``,
+    ``sobres``); ``None`` means plain units.
+    """
 
     packaging: str | None = None
     unit_size: Decimal | None = None
@@ -99,21 +103,23 @@ class PackagingInfo:
     total_units: int | None = None
     selling_method: SellingMethod = SellingMethod.UNKNOWN
     is_approximate_size: bool = False
+    unit_name: str | None = None
 
     def describe(self) -> str:
-        """Describe the presentation: ``Garrafa 5 l``, ``Pack-6 6 x 1,5 l``, ``Paquete 26 ud``...
+        """Describe the presentation: ``Garrafa 5 l``, ``Pack-6 6 x 1,5 l``, ``Caja 40 pastillas``.
 
         Several products of a chain often share a name and differ only here, so any
         listing must show it next to the name.
         """
         units = self.total_units if self.total_units and self.total_units > 1 else None
+        counted = f"{units} {self.unit_name or 'ud'}"
         if self.is_pack and units and self.pack_size:
             size = f"{units} x {_quantity(self.pack_size, self.size_format)}"
         elif units and self.size_format == "ud" and self.unit_size == 1:
-            size = f"{units} ud"
+            size = counted
         elif self.unit_size:
             size = _quantity(self.unit_size, self.size_format)
-            size = f"{size}, {units} ud" if units else size
+            size = f"{size}, {counted}" if units else size
         else:
             size = ""
         if size and self.is_approximate_size:

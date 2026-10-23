@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 MERCADONA_CODE: Final = SupermarketCode("mercadona")
 _TAGS: Final = re.compile(r"<[^>]+>")
 _EAN: Final = re.compile(r"^\d{8,14}$")
+_PLAIN_UNIT_NAMES: Final = frozenset({"", "ud", "uds", "unidad", "unidades"})
 _SELLING_METHODS: Final[dict[int, SellingMethod]] = {
     0: SellingMethod.UNIT,
     1: SellingMethod.WEIGHT,
@@ -196,6 +197,7 @@ class MercadonaScraper(
                     SellingMethod.UNKNOWN,
                 ),
                 is_approximate_size=pricing.approx_size,
+                unit_name=_unit_name(pricing.unit_name),
             ),
             category_external_ids=(category_external_id,),
             thumbnail_url=raw.thumbnail,
@@ -284,6 +286,12 @@ def _walk_sections(
     for section in sections:
         yield section, parent_id, level
         yield from _walk_sections(section.categories, str(section.id), level + 1)
+
+
+def _unit_name(raw: str | None) -> str | None:
+    """Return what Mercadona's units are called, or ``None`` for plain units (``ud.``)."""
+    name = (raw or "").strip().rstrip(".").strip()
+    return None if name.lower() in _PLAIN_UNIT_NAMES else name
 
 
 def _clean_text(value: str | None) -> str | None:

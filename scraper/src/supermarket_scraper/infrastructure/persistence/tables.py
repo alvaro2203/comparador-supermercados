@@ -82,6 +82,7 @@ products: Final = Table(
     Column("is_pack", Boolean, nullable=False, default=False),
     Column("pack_size", ExactDecimal(), nullable=True),
     Column("total_units", Integer, nullable=True),
+    Column("unit_name", String(40), nullable=True),
     Column("selling_method", String(16), nullable=False),
     Column("is_approximate_size", Boolean, nullable=False, default=False),
     Column("thumbnail_url", String(1000), nullable=True),

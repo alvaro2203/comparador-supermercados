@@ -188,6 +188,19 @@ estar resuelto **antes de crear la `0002`**.
   - **No hecho a propósito:** no he reescrito los ~2.100 precios antiguos afectados (18-23 oct). Para
     unos 200 no se puede saber el formato original; quedan como `unknown` (no comparables) en vez de
     con un valor adivinado.
+- [x] **La etiqueta dice «ud» cuando las unidades tienen nombre.**
+  - **Situación:** el detergente de Marsella sale como «Botella 3 l, 50 ud» cuando son 50 lavados, y
+    el lavavajillas en pastillas como «…, 30 ud» cuando son 30 pastillas. Mercadona envía el nombre
+    en `price_instructions.unit_name` («lavados», «pastillas»), pero el scraper no lo guarda.
+  - **Hacer:** añadir `unit_name` a `PackagingInfo` y a `products` (columna nueva, que admita NULL,
+    con su migración), mapearlo en el scraper de Mercadona y usarlo en `PackagingInfo.describe()`
+    en lugar de «ud» cuando exista. Comprobar después que las etiquetas siguen siendo únicas en el
+    catálogo activo.
+  - **Hecho:** `PackagingInfo.unit_name` y columna `products.unit_name` (migración `0005`). El
+    scraper guarda «lavados», «pastillas», «cápsulas», «sobres», «recambios»… y deja a NULL el
+    genérico «ud.». Las etiquetas quedan como «Botella 3 l, 50 lavados» o «Caja 40 pastillas».
+    Comprobado con 283 productos reales de 7 páginas: 283 etiquetas distintas. La comprobación
+    sobre el catálogo entero queda para después del próximo `run`, que es el que rellena la columna.
 
 ## P3 · Funcionalidad nueva
 
@@ -198,8 +211,6 @@ estar resuelto **antes de crear la `0002`**.
   poder reprocesarlos sin volver a llamar a la API y para depurar cambios de la API.
 - [ ] **Copia de seguridad diaria** de `supermarkets.db` antes de cada ejecución, rotando las copias
   como los logs. El histórico no se puede volver a descargar.
-- [ ] **Alertas** cuando una ejecución termine `partial` o `failed` (correo, Telegram o una
-  notificación del sistema). Hoy solo se ve en los logs y en Task Scheduler.
 - [ ] **Segunda cadena** (Carrefour, DIA…), con el skill `add-supermarket`. Es la prueba real de que el
   modelo y el emparejamiento por EAN funcionan.
 - [ ] **Comparar marcas blancas.** Hacendado, Deliplus o Bosque Verde no tienen equivalente por EAN en

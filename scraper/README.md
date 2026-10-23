@@ -145,7 +145,7 @@ comparador-supermercados/          # repository root
 |---|---|
 | `supermarkets` | One row per chain (`code` PK, e.g. `mercadona`). |
 | `categories` | Full tree per chain (`external_id`, `parent_external_id`, `level`, `is_active`). |
-| `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens), `gtin` and, on a delisted product, `replaced_by_product_id`. |
+| `products` | Current state of each product: name, packaging, size, `unit_name` (what `total_units` counts: `lavados`, `pastillas`…), URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens), `gtin` and, on a delisted product, `replaced_by_product_id`. |
 | `product_categories` | Many-to-many: a product can appear under several categories. |
 | `price_snapshots` | **Price history**, one row per product per day: shelf price, reference price per kg/l/unit, previous price, promotion flag, VAT. |
 | `scrape_runs` | Audit log of every execution with counters and errors, including the price changes broken down into regular increases and decreases and promotions started and ended (NULL for runs recorded before migration `0004`). |
@@ -193,7 +193,9 @@ saw the product. They answer different questions; use the one that fits.
 **Product labels.** Many products share a name and differ only in presentation (262 names, 631
 Mercadona products). Any listing must show `Product.label`, the name plus
 `PackagingInfo.describe()`: "Aceite de oliva virgen extra Hacendado (Garrafa 5 l)",
-"(Pack-6 6 x 1,5 l)", "(Paquete 26 ud)". It is unique across Mercadona's active catalog.
+"(Pack-6 6 x 1,5 l)", "(Paquete 26 ud)", "(Botella 3 l, 50 lavados)". Units are named after
+`unit_name` when the chain gives one, and plain "ud" otherwise (Mercadona's generic `ud.` is stored
+as NULL). It is unique across Mercadona's active catalog.
 
 #### Migrations
 
@@ -380,7 +382,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 134 tests, ~94% branch coverage
+uv run pytest --cov         # 139 tests, ~95% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

@@ -360,3 +360,31 @@ async def test_regular_price_moves_are_told_apart_from_promotions(
     assert report.run.stats.price_change_kinds == PriceChangeCounts(
         increased=1, decreased=1, promotions_started=1
     )
+
+
+async def test_unit_name_is_stored_and_refreshed(
+    make_scraper: Callable[[], MercadonaScraper],
+    uow_factory: Callable[[], UnitOfWork],
+    clock: FixedClock,
+    engine: Engine,
+    fake_api: FakeApi,
+) -> None:
+    page = cast("Page", fake_api.responses["/api/categories/112/"])
+    instructions = cast(
+        "dict[str, object]", page["categories"][0]["products"][0]["price_instructions"]
+    )
+    instructions.update(unit_name="lavados", total_units=50)
+    use_case = SyncCatalogUseCase(uow_factory, clock, SyncOptions(fetch_details=False))
+    async with make_scraper() as source:
+        await use_case.execute(source)
+
+    statement = select(schema.products.c.unit_name).where(schema.products.c.external_id == "4241")
+    with engine.connect() as connection:
+        assert connection.execute(statement).scalar_one() == "lavados"
+
+    instructions.update(unit_name="pastillas")
+    clock.advance()
+    async with make_scraper() as source:
+        await use_case.execute(source)
+    with engine.connect() as connection:
+        assert connection.execute(statement).scalar_one() == "pastillas"

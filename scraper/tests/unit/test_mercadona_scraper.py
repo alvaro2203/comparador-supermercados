@@ -129,3 +129,25 @@ async def test_product_without_its_new_arrival_flag_is_schema_drift(
     assert len(snapshot.failures) == 1
     assert "is_new_arrival" in snapshot.failures[0].reason
     assert "15061" not in {item.product.external_id for item in snapshot.listings}
+
+
+async def test_named_units_are_kept_and_the_generic_one_is_dropped(
+    make_scraper: Callable[[], MercadonaScraper], fake_api: FakeApi
+) -> None:
+    page = cast(
+        "dict[str, list[dict[str, list[dict[str, object]]]]]",
+        fake_api.responses["/api/categories/112/"],
+    )
+    oil, garrafa = page["categories"][0]["products"]
+    cast("dict[str, object]", oil["price_instructions"]).update(
+        unit_name=" lavados ", total_units=50, unit_size=3.0
+    )
+    cast("dict[str, object]", garrafa["price_instructions"]).update(unit_name="ud.", total_units=6)
+    async with make_scraper() as scraper:
+        snapshot = await scraper.fetch_catalog()
+
+    listings = {item.product.external_id: item for item in snapshot.deduplicated_listings()}
+    assert listings["4241"].product.packaging.unit_name == "lavados"
+    assert listings["4241"].product.label.endswith("(Botella 3 l, 50 lavados)")
+    assert listings["4749"].product.packaging.unit_name is None
+    assert listings["4749"].product.label.endswith("(Garrafa 5 l, 6 ud)")
