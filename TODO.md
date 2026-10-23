@@ -204,11 +204,22 @@ estar resuelto **antes de crear la `0002`**.
 
 ## P3 · Funcionalidad nueva
 
-- [ ] **Comando `report`.** Un resumen de la última ejecución frente a la anterior: cambios de precio
+- [x] **Comando `report`.** Un resumen de la última ejecución frente a la anterior: cambios de precio
   con los mayores porcentajes, altas, bajas, promociones y cobertura de EAN. Es el análisis que hoy se
   hace a mano con SQL.
-- [ ] **Comando `dump`.** Guardar los JSON en bruto de cada ejecución en `data/raw/<fecha>/`, para
+  - **Hecho:** `report [CODE ...] [--day AAAA-MM-DD] [--top N]`, sin red. Compara un día de precios
+    guardados (por defecto el último) con el día anterior que tenga datos, no ejecuciones: varias
+    ejecuciones el mismo día cuentan como un día. Muestra los cambios por tipo con las mayores
+    subidas, bajadas y promociones nuevas, los productos nuevos y retirados, las promociones activas,
+    las novedades, la cobertura de GTIN y los precios sin unidad de referencia. Usa `Product.label`.
+- [x] **Comando `dump`.** Guardar los JSON en bruto de cada ejecución en `data/raw/<fecha>/`, para
   poder reprocesarlos sin volver a llamar a la API y para depurar cambios de la API.
+  - **Hecho:** `dump` descarga y valida sin tocar la base de datos; `run --save-raw` guarda lo que
+    descarga un run normal (también las fichas), y `run --from-raw <carpeta>` lo procesa sin red con
+    la fecha del volcado. Se guarda en `data/raw/<cadena>/<fecha>/` byte a byte, con `manifest.json`.
+    Unos 6-10 MB al día sin comprimir.
+  - **Sin verificar contra la API real:** no se ha lanzado `dump` (son ~150 peticiones); lo cubren
+    los tests con `FakeApi`. Si el tamaño molesta, se puede comprimir con gzip más adelante.
 - [ ] **Copia de seguridad diaria** de `supermarkets.db` antes de cada ejecución, rotando las copias
   como los logs. El histórico no se puede volver a descargar.
 - [ ] **Segunda cadena** (Carrefour, DIA…), con el skill `add-supermarket`. Es la prueba real de que el

@@ -5,11 +5,15 @@ import asyncio
 import io
 import logging
 import sys
+from dataclasses import dataclass
+from datetime import date
 from enum import IntEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from pydantic import ValidationError
 
+from supermarket_scraper.application.price_report import DEFAULT_TOP
 from supermarket_scraper.bootstrap import Container, build_container
 from supermarket_scraper.config import Settings
 from supermarket_scraper.domain.entities import RunStatus
@@ -22,11 +26,12 @@ from supermarket_scraper.infrastructure.persistence.database import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from supermarket_scraper.application.enrich_details import EnrichReport
+    from supermarket_scraper.application.price_report import PriceMove, PriceReport
     from supermarket_scraper.application.sync_catalog import SyncReport
-    from supermarket_scraper.domain.entities import PriceChangeCounts
+    from supermarket_scraper.domain.entities import PriceChangeCounts, Product
 
 logger: Final = logging.getLogger("supermarket_scraper.cli")
 
@@ -65,6 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Scrape and validate without writing to the database.",
     )
+    run.add_argument(
+        "--save-raw",
+        action="store_true",
+        help="Also save every downloaded JSON under SCRAPER_RAW_DIR/<code>/<day>/.",
+    )
+    run.add_argument(
+        "--from-raw",
+        metavar="DIR",
+        help="Process an archive saved by dump or --save-raw, offline, under its capture day.",
+    )
     details = run.add_mutually_exclusive_group()
     details.add_argument(
         "--details",
@@ -97,6 +112,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enrich at most N products per supermarket (default: all pending).",
     )
 
+    dump = commands.add_parser(
+        "dump",
+        help="Download catalogs as raw JSON to SCRAPER_RAW_DIR/<code>/<day>/ (no database).",
+    )
+    dump.add_argument(
+        "supermarkets",
+        nargs="*",
+        metavar="SUPERMARKET",
+        help="Supermarket codes to download (default: all registered).",
+    )
+
+    report = commands.add_parser(
+        "report", help="Compare a day of stored prices with the previous one (no network)."
+    )
+    report.add_argument(
+        "supermarkets",
+        nargs="*",
+        metavar="SUPERMARKET",
+        help="Supermarket codes to report on (default: all registered).",
+    )
+    report.add_argument("--day", help="Day to report, YYYY-MM-DD (default: the latest).")
+    report.add_argument(
+        "--top", type=int, default=DEFAULT_TOP, help="Products listed per section (default: 10)."
+    )
+
     history = commands.add_parser("history", help="Show the latest runs of a supermarket.")
     history.add_argument("supermarket", metavar="SUPERMARKET")
     history.add_argument("--limit", type=int, default=10)
@@ -127,41 +167,111 @@ def main(argv: Sequence[str] | None = None) -> int:
         container.engine.dispose()
 
 
+@dataclass(frozen=True, slots=True)
+class RunFlags:
+    """Options of the ``run`` command."""
+
+    dry_run: bool
+    details: bool | None
+    save_raw: bool
+    from_raw: str | None
+
+
 def _execute(container: Container, args: argparse.Namespace) -> int:
     """Dispatch the parsed command and return its exit code."""
+    handlers: dict[str, Callable[[], int]] = {
+        "init-db": lambda: _init_db(container),
+        "list": lambda: _list(container),
+        "report": lambda: _report(container, args.supermarkets, args.day, args.top),
+        "history": lambda: _history(container, args.supermarket, args.limit),
+        "enrich": lambda: asyncio.run(_enrich(container, args.supermarkets, args.limit)),
+        "dump": lambda: asyncio.run(_dump(container, args.supermarkets)),
+        "run": lambda: asyncio.run(
+            _run(
+                container,
+                args.supermarkets,
+                RunFlags(
+                    dry_run=args.dry_run,
+                    details=args.fetch_details,
+                    save_raw=args.save_raw,
+                    from_raw=args.from_raw,
+                ),
+            )
+        ),
+    }
     command: str = args.command
-    if command == "init-db":
+    return handlers[command]()
+
+
+def _init_db(container: Container) -> int:
+    """Create or upgrade the schema."""
+    upgrade_schema(container.engine)
+    sys.stdout.write("Database schema is up to date.\n")
+    return ExitCode.OK
+
+
+def _list(container: Container) -> int:
+    """Print the registered supermarket codes."""
+    sys.stdout.write("\n".join(container.registry.codes()) + "\n")
+    return ExitCode.OK
+
+
+async def _run(container: Container, codes: Sequence[str], flags: RunFlags) -> int:
+    """Scrape (or replay) the requested supermarkets and aggregate the exit code."""
+    details = flags.details
+    if flags.from_raw is not None:
+        if codes or flags.save_raw:
+            sys.stderr.write(
+                "--from-raw replays one archive: do not combine it with supermarket codes "
+                "or --save-raw\n"
+            )
+            return ExitCode.USAGE
+        code, container = container.replaying(Path(flags.from_raw))
+        selected = _select_supermarkets(container, [code])
+        details = False
+    else:
+        selected = _select_supermarkets(container, codes)
+    if not flags.dry_run:
         upgrade_schema(container.engine)
-        sys.stdout.write("Database schema is up to date.\n")
-        return ExitCode.OK
-    if command == "list":
-        sys.stdout.write("\n".join(container.registry.codes()) + "\n")
-        return ExitCode.OK
-    if command == "history":
-        return _history(container, args.supermarket, args.limit)
-    if command == "enrich":
-        return asyncio.run(_enrich(container, args.supermarkets, args.limit))
-    supermarkets: list[str] = args.supermarkets
-    dry_run: bool = args.dry_run
-    fetch_details: bool | None = args.fetch_details
-    return asyncio.run(_run(container, supermarkets, dry_run=dry_run, details=fetch_details))
+    results = await _sync_all(
+        container, selected, dry_run=flags.dry_run, details=details, save_raw=flags.save_raw
+    )
+    return _print_sync_results(results)
 
 
-async def _run(
-    container: Container, codes: Sequence[str], *, dry_run: bool, details: bool | None
-) -> int:
-    """Scrape the requested supermarkets one after another and aggregate the exit code."""
+async def _dump(container: Container, codes: Sequence[str]) -> int:
+    """Download the requested catalogs to the raw archive, validating them, without the database."""
     selected = _select_supermarkets(container, codes)
-    if not dry_run:
-        upgrade_schema(container.engine)
-    use_case = container.sync_use_case(dry_run=dry_run, fetch_details=details)
-    reports: list[SyncReport] = []
-    for code in selected:
-        async with container.registry.create(code, container.scraper_context) as source:
-            reports.append(await use_case.execute(source))
-    for report in reports:
+    results = await _sync_all(container, selected, dry_run=True, details=False, save_raw=True)
+    return _print_sync_results(results)
+
+
+async def _sync_all(
+    container: Container,
+    codes: Sequence[str],
+    *,
+    dry_run: bool,
+    details: bool | None,
+    save_raw: bool,
+) -> list[tuple[SyncReport, Path | None]]:
+    """Sync each supermarket in turn, recording its responses when ``save_raw`` is set."""
+    results: list[tuple[SyncReport, Path | None]] = []
+    for code in codes:
+        scoped = container.recording(code) if save_raw else container
+        use_case = scoped.sync_use_case(dry_run=dry_run, fetch_details=details)
+        async with scoped.registry.create(code, scoped.scraper_context) as source:
+            report = await use_case.execute(source)
+        results.append((report, scoped.raw_archive_dir(code) if save_raw else None))
+    return results
+
+
+def _print_sync_results(results: Sequence[tuple[SyncReport, Path | None]]) -> int:
+    """Print each run report, and where its raw JSON went; return the aggregated exit code."""
+    for report, archive in results:
         _print_report(report)
-    return _exit_code(report.run.status for report in reports)
+        if archive is not None:
+            sys.stdout.write(f"  raw JSON saved to {archive}\n")
+    return _exit_code(report.run.status for report, _ in results)
 
 
 async def _enrich(container: Container, codes: Sequence[str], limit: int | None) -> int:
@@ -200,6 +310,76 @@ def _exit_code(statuses: Iterable[RunStatus]) -> ExitCode:
     if RunStatus.PARTIAL in seen:
         return ExitCode.PARTIAL
     return ExitCode.OK
+
+
+def _report(container: Container, codes: Sequence[str], day: str | None, top: int) -> int:
+    """Print the price report of each requested supermarket. Reads the database only."""
+    if top < 1:
+        sys.stderr.write("--top must be at least 1\n")
+        return ExitCode.USAGE
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError:
+        sys.stderr.write("--day must be a date like 2026-10-23\n")
+        return ExitCode.USAGE
+    selected = _select_supermarkets(container, codes)
+    upgrade_schema(container.engine)
+    use_case = container.report_use_case()
+    for code in selected:
+        _print_price_report(use_case.execute(SupermarketCode(code), day=target, top=top), top)
+    return ExitCode.OK
+
+
+def _print_price_report(report: PriceReport, top: int) -> None:
+    """Write a price report as a block of aligned lines."""
+    if report.previous_day is None:
+        heading = f"[{report.supermarket}] {report.day} (no previous day to compare)"
+    else:
+        heading = f"[{report.supermarket}] {report.day} vs {report.previous_day}"
+    gtin_share = report.products_with_gtin / report.active_products * 100
+    lines = [
+        heading,
+        f"  products priced  {report.active_products}",
+        f"  with GTIN        {report.products_with_gtin} ({gtin_share:.1f} %)",
+        f"  new arrivals     {report.new_arrivals} (chain badge)",
+        f"  promotions       {report.promotions_active} active",
+        f"  unknown ref unit {report.unknown_reference_units}",
+    ]
+    kinds = report.price_change_kinds
+    if kinds is not None:
+        lines.append(
+            f"  price changes    {kinds.total} ({kinds.increased} up, {kinds.decreased} down, "
+            f"{kinds.promotions_started} promo started, {kinds.promotions_ended} promo ended)"
+        )
+        lines.extend(_move_section("top increases", report.top_increases))
+        lines.extend(_move_section("top decreases", report.top_decreases))
+        lines.extend(_move_section("promotions started", report.promotions_started))
+        lines.extend(_product_section("new products", report.new_products, top))
+        lines.extend(_product_section("delisted", report.delisted_products, top))
+    sys.stdout.write("\n".join(lines) + "\n")
+
+
+def _move_section(title: str, moves: Sequence[PriceMove]) -> list[str]:
+    """Render price moves as ``+8.12 %  36.95 -> 39.95  label`` lines under a title."""
+    if not moves:
+        return []
+    return [
+        f"  {title}",
+        *(
+            f"    {move.change_percentage:+.2f} %  {move.before.amount:.2f} -> "
+            f"{move.after.amount:.2f}  {move.product.label}"
+            for move in moves
+        ),
+    ]
+
+
+def _product_section(title: str, products: Sequence[Product], top: int) -> list[str]:
+    """Render a count and up to ``top`` product labels."""
+    lines = [f"  {title:<16} {len(products)}"]
+    lines.extend(f"    {product.label}" for product in products[:top])
+    if len(products) > top:
+        lines.append(f"    ... and {len(products) - top} more")
+    return lines
 
 
 def _history(container: Container, code: str, limit: int) -> int:

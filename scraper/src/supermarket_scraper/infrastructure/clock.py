@@ -23,3 +23,22 @@ class SystemClock(Clock):
     def today(self) -> date:
         """Return today's date in the business timezone."""
         return datetime.now(self._zone).date()
+
+
+class FrozenClock(Clock):
+    """Clock stopped at one instant, used to replay an archive under its capture day."""
+
+    def __init__(self, at: datetime, timezone: str) -> None:
+        """Freeze the clock at ``at`` and decide days in the IANA ``timezone``."""
+        self._at = at.astimezone(UTC)
+        self._zone = ZoneInfo(timezone)
+
+    @override
+    def now(self) -> datetime:
+        """Return the frozen instant in UTC."""
+        return self._at
+
+    @override
+    def today(self) -> date:
+        """Return the frozen instant's date in the business timezone."""
+        return self._at.astimezone(self._zone).date()

@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
-    from datetime import datetime
+    from collections.abc import Collection, Mapping, Sequence
+    from datetime import date, datetime
     from types import TracebackType
 
     from supermarket_scraper.domain.entities import (
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
         ScrapeRun,
         Supermarket,
     )
-    from supermarket_scraper.domain.value_objects import SupermarketCode
+    from supermarket_scraper.domain.value_objects import Price, SupermarketCode
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +111,12 @@ class ProductRepository(ABC):
         comes back to the catalog loses its link.
         """
 
+    @abstractmethod
+    def find(
+        self, supermarket: SupermarketCode, external_ids: Collection[str]
+    ) -> Sequence[Product]:
+        """Return the stored products with the given external ids, active or not."""
+
 
 class PriceRepository(ABC):
     """Persistence contract for the historical price series."""
@@ -118,6 +124,14 @@ class PriceRepository(ABC):
     @abstractmethod
     def record(self, observations: Sequence[PriceObservation]) -> PriceRecordResult:
         """Store one observation per product and day, idempotently for re-runs."""
+
+    @abstractmethod
+    def captured_days(self, supermarket: SupermarketCode) -> Sequence[date]:
+        """Return every day with stored prices for the supermarket, newest first."""
+
+    @abstractmethod
+    def prices_on(self, supermarket: SupermarketCode, day: date) -> Mapping[str, Price]:
+        """Return the prices captured on ``day``, keyed by product external id."""
 
 
 class ScrapeRunRepository(ABC):

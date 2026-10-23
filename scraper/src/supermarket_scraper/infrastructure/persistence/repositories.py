@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from itertools import batched
-from typing import TYPE_CHECKING, Final, override
+from typing import TYPE_CHECKING, Any, Final, override
 
 from sqlalchemy import Table, and_, bindparam, case, delete, func, insert, select, update
 
 from supermarket_scraper.domain.entities import (
+    PackagingInfo,
     PriceChangeCounts,
+    Product,
     RunStats,
     RunStatus,
     ScrapeRun,
@@ -22,21 +24,26 @@ from supermarket_scraper.domain.repositories import (
     ScrapeRunRepository,
     SupermarketRepository,
 )
-from supermarket_scraper.domain.value_objects import Price, SupermarketCode
+from supermarket_scraper.domain.value_objects import (
+    MeasureUnit,
+    Price,
+    SellingMethod,
+    SupermarketCode,
+)
 from supermarket_scraper.infrastructure.persistence import tables as schema
 from supermarket_scraper.infrastructure.persistence.upsert import upsert
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
     from datetime import date, datetime
 
     from sqlalchemy import Connection
+    from sqlalchemy.engine import Row as SqlRow
     from sqlalchemy.sql.elements import ColumnElement
 
     from supermarket_scraper.domain.entities import (
         Category,
         PriceObservation,
-        Product,
         ProductDetails,
     )
     from supermarket_scraper.domain.value_objects import PriceChangeKind
@@ -348,6 +355,20 @@ class SqlProductRepository(ProductRepository):
             )
         return len(parameters)
 
+    @override
+    def find(
+        self, supermarket: SupermarketCode, external_ids: Collection[str]
+    ) -> Sequence[Product]:
+        """Load products by external id, in chunks to respect bind-parameter limits."""
+        table = schema.products
+        found: list[Product] = []
+        for chunk in batched(sorted(external_ids), IN_CLAUSE_CHUNK):
+            statement = select(table).where(
+                table.c.supermarket_code == str(supermarket), table.c.external_id.in_(chunk)
+            )
+            found.extend(_product_from_row(row) for row in self._connection.execute(statement))
+        return found
+
     def _update_identity_attributes(
         self, supermarket: SupermarketCode, items: Sequence[Product]
     ) -> None:
@@ -452,6 +473,44 @@ class SqlPriceRepository(PriceRepository):
             )
             recorded += len(rows)
         return PriceRecordResult(recorded=recorded, kinds=PriceChangeCounts.tally(kinds))
+
+    @override
+    def captured_days(self, supermarket: SupermarketCode) -> Sequence[date]:
+        """List the distinct capture days of a supermarket, newest first."""
+        prices = schema.price_snapshots
+        products = schema.products
+        statement = (
+            select(prices.c.captured_on)
+            .join(products, products.c.id == prices.c.product_id)
+            .where(products.c.supermarket_code == str(supermarket))
+            .group_by(prices.c.captured_on)
+            .order_by(prices.c.captured_on.desc())
+        )
+        return list(self._connection.execute(statement).scalars())
+
+    @override
+    def prices_on(self, supermarket: SupermarketCode, day: date) -> Mapping[str, Price]:
+        """Load one day of prices for a supermarket, keyed by product external id."""
+        prices = schema.price_snapshots
+        products = schema.products
+        statement = (
+            select(products.c.external_id, prices)
+            .join(products, products.c.id == prices.c.product_id)
+            .where(products.c.supermarket_code == str(supermarket), prices.c.captured_on == day)
+        )
+        return {
+            row.external_id: Price(
+                amount=row.amount,
+                currency=row.currency,
+                reference_amount=row.reference_amount,
+                reference_unit=MeasureUnit(row.reference_unit),
+                previous_amount=row.previous_amount,
+                bulk_amount=row.bulk_amount,
+                vat_rate=row.vat_rate,
+                is_promotion=bool(row.is_promotion),
+            )
+            for row in self._connection.execute(statement)
+        }
 
     def _previous_prices(self, supermarket: SupermarketCode, day: date) -> dict[int, Price]:
         """Return the latest shelf price before ``day`` for every product of a supermarket."""
@@ -580,6 +639,33 @@ def _product_row(product: Product, seen_at: datetime) -> Row:
         "delisted_at": None,
         "replaced_by_product_id": None,
     }
+
+
+def _product_from_row(row: SqlRow[Any]) -> Product:
+    """Translate a ``products`` row back into a domain product (without its categories)."""
+    return Product(
+        supermarket=SupermarketCode(row.supermarket_code),
+        external_id=row.external_id,
+        name=row.name,
+        packaging=PackagingInfo(
+            packaging=row.packaging,
+            unit_size=row.unit_size,
+            size_format=row.size_format,
+            is_pack=bool(row.is_pack),
+            pack_size=row.pack_size,
+            total_units=row.total_units,
+            selling_method=SellingMethod(row.selling_method),
+            is_approximate_size=bool(row.is_approximate_size),
+            unit_name=row.unit_name,
+        ),
+        slug=row.slug,
+        brand=row.brand,
+        ean=row.ean,
+        thumbnail_url=row.thumbnail_url,
+        share_url=row.share_url,
+        is_available=bool(row.is_available),
+        is_new_arrival=bool(row.is_new_arrival),
+    )
 
 
 def _price_change_kind_columns(kinds: PriceChangeCounts | None) -> Row:

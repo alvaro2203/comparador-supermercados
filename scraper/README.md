@@ -111,9 +111,11 @@ comparador-supermercados/          # repository root
     │   ├── application/
     │   │   ├── ports.py                # CatalogSource (scraper contract), Clock
     │   │   ├── sync_catalog.py         # SyncCatalogUseCase
-    │   │   └── enrich_details.py       # EnrichDetailsUseCase (detail backfill)
+    │   │   ├── enrich_details.py       # EnrichDetailsUseCase (detail backfill)
+    │   │   └── price_report.py         # BuildPriceReportUseCase (read-only day-over-day report)
     │   ├── infrastructure/
     │   │   ├── http/client.py          # AsyncJsonClient (retries, pacing, concurrency)
+    │   │   ├── http/archive.py         # raw JSON archive: recording and replay transports
     │   │   ├── scrapers/
     │   │   │   ├── base.py             # BaseSupermarketScraper (template method)
     │   │   │   ├── registry.py         # @register_scraper + auto-discovery
@@ -257,9 +259,83 @@ uv run supermarket-scraper history mercadona
 |---|---|
 | `init-db` | Create the schema or apply pending migrations (idempotent; `run` also does this automatically). |
 | `list` | List registered supermarkets. |
-| `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. |
+| `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. `--save-raw` also archives every downloaded JSON (see below). `--from-raw DIR` processes an archive instead of the network. |
+| `dump [CODE ...]` | Download each catalog to the raw archive and validate it, without opening the database. |
+| `report [CODE ...] [--day YYYY-MM-DD] [--top N]` | Offline: compare a day of stored prices (default: the latest) with the previous day that has prices. See "Price report" below. |
 | `enrich [CODE ...] [--limit N]` | Fetch details (EAN, brand, ingredients) for every product never enriched, or at most N per chain. Commits every 100 products, so an interrupted backfill resumes where it stopped; stops if a whole chunk fails. Prints the reason for each failed product (up to 20; every one goes to the log as `Detail enrichment failure`). Not recorded in `scrape_runs`. |
 | `history CODE [--limit N]` | Show the latest runs and their counters, with price changes split into `up` / `down` (regular price) and `promo+` / `promo-` (promotion started / ended); `-` for runs recorded before the split existed. |
+
+### Price report
+
+`report` answers "what changed in prices since the last time?" from the database alone: it makes
+no request, so run it as often as you like, typically right after `run`.
+
+```powershell
+uv run supermarket-scraper report                       # every chain, latest day vs the one before
+uv run supermarket-scraper report mercadona             # one chain
+uv run supermarket-scraper report --day 2026-10-21      # that day vs the day with prices before it
+uv run supermarket-scraper report --top 25              # list up to 25 products per section
+```
+
+It compares **days, not runs**. The latest day with prices (or `--day`) is compared with the
+closest earlier day that has prices, whatever the gap: if no run happened on the 22nd, the 23rd is
+compared with the 21st. Several runs on the same day count as one, since each overwrites that
+day's snapshot. `--top` (default `10`) only limits how many products each section lists; the
+counts always cover the whole catalog. A day without prices exits with `64` and a one-line message.
+
+```
+[mercadona] 2026-10-23 vs 2026-10-21
+  products priced  4275
+  with GTIN        4275 (100.0 %)
+  new arrivals     102 (chain badge)
+  promotions       134 active
+  unknown ref unit 1
+  price changes    45 (15 up, 11 down, 12 promo started, 7 promo ended)
+  top increases
+    +16.67 %  0.36 -> 0.42  Limón (Pieza aprox. 160 g)
+    +15.00 %  0.20 -> 0.23  Pimiento verde freír (Pieza aprox. 90 g)
+  top decreases
+    -23.73 %  0.59 -> 0.45  Pera Limonera (Pieza aprox. 160 g)
+  promotions started
+    -24.68 %  9.24 -> 6.96  Cerveza clásica Mahou (12 x 330 ml)
+  new products     14
+    Aceite de oliva virgen extra Hacendado (Garrafa 5 l)
+    ... and 13 more
+  delisted         21
+    Barra de pan espiga (400 g)
+    ... and 20 more
+```
+
+| Line | Meaning |
+|---|---|
+| `products priced` | Products with a price snapshot on the reported day. |
+| `with GTIN` | How many of them have a valid EAN, the key for comparing across chains. |
+| `new arrivals` | Products carrying the chain's own "new" badge (`is_new_arrival`). |
+| `promotions` | Products whose price that day is a promotion. |
+| `unknown ref unit` | Prices whose reference unit could not be parsed, so they cannot be compared by `reference_amount`. Should stay near zero; a jump means the chain started quoting a new unit. |
+| `price changes` | Products priced on both days whose shelf price changed, split as in `history`: regular increases and decreases, promotions started and ended. |
+| `top increases` / `top decreases` | Regular price moves (not promotions) with the largest percentage, shelf price before and after. |
+| `promotions started` | New promotions, deepest discount first. |
+| `new products` / `delisted` | Priced on the reported day but not the previous one, and the reverse. This compares the two days only, so it differs from the `delisted_at` flag, which waits for a complete scrape. |
+
+`with GTIN` and `new arrivals` use each product's current data, because neither is kept per day.
+Without a previous day (the first day ever, or `--day` set to it), only the counts are shown.
+
+### Raw JSON archive
+
+`dump` and `run --save-raw` save every successful response, byte for byte, under
+`SCRAPER_RAW_DIR/<code>/<YYYY-MM-DD>/` (default `data/raw/`, git-ignored). File names mirror the URL
+path (`/api/categories/112/` is `api/categories/112.json`); query parameters are not part of the
+name. `manifest.json` records the supermarket and the capture instant. A full Mercadona catalog is
+about 150 files and 6-10 MB a day; `--save-raw` also keeps the product details it fetched. A second
+capture on the same day overwrites files with the same name and leaves the others.
+
+`run --from-raw data/raw/mercadona/2026-10-23` processes such an archive with no network at all:
+prices are stored under the capture day (the clock is frozen at the manifest's instant), pacing is
+off, and product details are skipped. It accepts `--dry-run`, which validates an archive against
+the current schemas without writing; it does not accept supermarket codes or `--save-raw`. Use it
+to reload a day after a bug fix, or to reproduce an API change offline. The usual flow if you
+prefer to download first and process later is `dump`, then `run --from-raw`.
 
 Exit codes: `0` success, `1` partial (some pages or details failed, data stored), `2` failed
 (including a failed schema migration, in which case nothing is scraped), `64` usage or
@@ -273,6 +349,7 @@ list. The most important ones:
 | Variable | Default | Notes |
 |---|---|---|
 | `SCRAPER_DATABASE_URL` | `sqlite:///data/supermarkets.db` | Any SQLAlchemy URL. |
+| `SCRAPER_RAW_DIR` | `data/raw` | Where `dump` and `run --save-raw` archive raw JSON. |
 | `SCRAPER_TIMEZONE` | `Europe/Madrid` | Decides which calendar day a snapshot belongs to. |
 | `SCRAPER_FETCH_DETAILS` / `SCRAPER_DETAILS_LIMIT` | `true` / `500` | EAN and brand enrichment, for never-enriched products only, at most N per run. The whole Mercadona catalog is enriched over the first ~10 days, then only new arrivals. `enrich` does the backlog in one go (~3,300 products, about 15 minutes at the default pacing). |
 | `SCRAPER_HTTP_MAX_CONCURRENCY` / `SCRAPER_HTTP_MIN_INTERVAL_SECONDS` | `4` / `0.25` | Politeness. Keep them conservative. |
@@ -382,7 +459,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 139 tests, ~95% branch coverage
+uv run pytest --cov         # 159 tests, ~95% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

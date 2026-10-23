@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "sqlite:///data/supermarkets.db"
+    raw_dir: Path = Path("data/raw")
     database_echo: bool = False
     timezone: str = "Europe/Madrid"
 

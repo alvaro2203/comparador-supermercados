@@ -1,26 +1,41 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+import json
+from datetime import UTC, date, datetime
+from functools import partial
+from typing import TYPE_CHECKING, cast
 
+from sqlalchemy import select
+
+from supermarket_scraper.application.sync_catalog import SyncCatalogUseCase, SyncOptions
 from supermarket_scraper.bootstrap import Container, build_container
 from supermarket_scraper.domain.entities import RunStats, ScrapeRun, Supermarket
 from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.persistence.database import build_engine, upgrade_schema
-from supermarket_scraper.infrastructure.persistence.tables import supermarkets
+from supermarket_scraper.infrastructure.persistence.tables import price_snapshots, supermarkets
 from supermarket_scraper.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from supermarket_scraper.presentation import cli
 from supermarket_scraper.presentation.cli import ExitCode, main
-from tests.conftest import BASE_URL
+from tests.conftest import BASE_URL, FixedClock
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import pytest
 
     from supermarket_scraper.config import Settings
+    from supermarket_scraper.infrastructure.scrapers.mercadona.scraper import MercadonaScraper
     from tests.conftest import FakeApi
+
+
+async def sync_once(
+    use_case: SyncCatalogUseCase, make_scraper: Callable[[], MercadonaScraper]
+) -> None:
+    async with make_scraper() as source:
+        await use_case.execute(source)
 
 
 def use_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -242,3 +257,148 @@ def test_run_report_and_history_break_price_changes_down(
     assert lines[0].split()[-5:] == ["up", "down", "promo+", "promo-", "errors"]
     assert lines[2].split()[-5:] == ["0", "0", "0", "0", "0"]
     assert lines[3].split()[-5:] == ["-", "-", "-", "-", "0"]
+
+
+def test_report_prints_the_day_against_the_previous_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    make_scraper: Callable[[], MercadonaScraper],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    clock = FixedClock(datetime(2026, 10, 1, 6, 0, tzinfo=UTC))
+    engine = build_engine(f"sqlite:///{tmp_path / 'cli.db'}")
+    upgrade_schema(engine)
+    use_case = SyncCatalogUseCase(
+        partial(SqlAlchemyUnitOfWork, engine), clock, SyncOptions(fetch_details=False)
+    )
+    asyncio.run(sync_once(use_case, make_scraper))
+    page = cast(
+        "dict[str, list[dict[str, list[dict[str, object]]]]]",
+        fake_api.responses["/api/categories/112/"],
+    )
+    garrafa = page["categories"][0]["products"][1]
+    cast("dict[str, object]", garrafa["price_instructions"]).update(unit_price="39.95")
+    clock.advance()
+    asyncio.run(sync_once(use_case, make_scraper))
+    engine.dispose()
+
+    assert main(["report", "mercadona", "--top", "5"]) == ExitCode.OK
+
+    output = capsys.readouterr().out
+    assert "[mercadona] 2026-10-02 vs 2026-10-01" in output
+    assert "  price changes    1 (1 up, 0 down, 0 promo started, 0 promo ended)" in output
+    assert "    +8.12 %  36.95 -> 39.95  Aceite de oliva 0,4º Hacendado (Garrafa 5 l)" in output
+    assert "  new products     0" in output
+
+    assert main(["report", "--day", "2026-10-01"]) == ExitCode.OK
+    assert "2026-10-01 (no previous day to compare)" in capsys.readouterr().out
+
+
+def test_report_usage_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    use_database(monkeypatch, tmp_path)
+
+    assert main(["report", "mercadona"]) == ExitCode.USAGE
+    assert "No prices stored for mercadona" in capsys.readouterr().err
+    assert main(["report", "--day", "23/10/2026"]) == ExitCode.USAGE
+    assert "--day must be a date like 2026-10-23" in capsys.readouterr().err
+    assert main(["report", "lidl"]) == ExitCode.USAGE
+    assert main(["report", "--top", "0"]) == ExitCode.USAGE
+
+
+def raw_day_dirs(tmp_path: Path) -> list[Path]:
+    return sorted((tmp_path / "raw" / "mercadona").iterdir())
+
+
+def test_dump_saves_the_raw_catalog_without_touching_the_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    monkeypatch.setenv("SCRAPER_RAW_DIR", str(tmp_path / "raw"))
+
+    assert main(["dump"]) == ExitCode.OK
+
+    [archive] = raw_day_dirs(tmp_path)
+    assert (archive / "manifest.json").is_file()
+    assert sorted(path.relative_to(archive).as_posix() for path in archive.rglob("*.json")) == [
+        "api/categories.json",
+        "api/categories/112.json",
+        "api/categories/115.json",
+        "manifest.json",
+    ]
+    assert not (tmp_path / "cli.db").exists()
+    assert f"raw JSON saved to {archive}" in capsys.readouterr().out
+
+
+def test_run_from_raw_loads_a_dump_offline_under_its_capture_day(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    monkeypatch.setenv("SCRAPER_RAW_DIR", str(tmp_path / "raw"))
+    assert main(["dump", "mercadona"]) == ExitCode.OK
+    [archive] = raw_day_dirs(tmp_path)
+    manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+    manifest["captured_at"] = "2026-09-30T22:30:00+00:00"
+    (archive / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    requests_before = len(fake_api.calls)
+    capsys.readouterr()
+
+    assert main(["run", "--from-raw", str(archive)]) == ExitCode.OK
+
+    assert len(fake_api.calls) == requests_before
+    assert "new products     4" in capsys.readouterr().out
+    engine = build_engine(f"sqlite:///{tmp_path / 'cli.db'}")
+    with engine.connect() as connection:
+        days = connection.execute(select(price_snapshots.c.captured_on).distinct()).scalars().all()
+    engine.dispose()
+    assert days == [date(2026, 10, 1)]
+
+
+def test_run_save_raw_also_archives_product_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    monkeypatch.setenv("SCRAPER_RAW_DIR", str(tmp_path / "raw"))
+
+    assert main(["run", "--save-raw"]) == ExitCode.PARTIAL
+
+    [archive] = raw_day_dirs(tmp_path)
+    assert (archive / "api" / "products" / "4241.json").is_file()
+    assert (tmp_path / "cli.db").exists()
+
+
+def test_from_raw_usage_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+
+    assert main(["run", "--from-raw", str(tmp_path / "nowhere")]) == ExitCode.USAGE
+    assert "manifest.json is missing" in capsys.readouterr().err
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "manifest.json").write_text(
+        '{"supermarket": "mercadona", "captured_at": "2026-10-01T06:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    assert main(["run", "dia", "--from-raw", str(archive)]) == ExitCode.USAGE
+    assert "--from-raw replays one archive" in capsys.readouterr().err
+    assert main(["run", "--from-raw", str(archive), "--save-raw"]) == ExitCode.USAGE
+    assert fake_api.calls == []

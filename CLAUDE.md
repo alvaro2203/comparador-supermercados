@@ -44,12 +44,17 @@ uv run supermarket-scraper list               # registered chains
 uv run supermarket-scraper run --dry-run      # full scrape, writes nothing
 uv run supermarket-scraper run [CODE ...] [--details|--no-details]
 uv run supermarket-scraper enrich [CODE ...] [--limit N]   # backfill EAN/details (real API)
+uv run supermarket-scraper dump [CODE ...]    # raw JSON to data/raw/<code>/<day>/, no database (real API)
+uv run supermarket-scraper run --save-raw     # normal run that also archives the raw JSON
+uv run supermarket-scraper run --from-raw data/raw/mercadona/<day>   # process an archive, offline
+uv run supermarket-scraper report [CODE ...] [--day YYYY-MM-DD] [--top N]   # day vs previous day
 uv run supermarket-scraper history mercadona [--limit N]
 ```
 
 `run` without `--dry-run` hits the real Mercadona API (~150 requests, plus up to 500 details) and
 `enrich` makes one request per pending product (~3,300 on a fresh database). Both write to
-`scraper/data/supermarkets.db`. Do not run either unless asked. Tests never touch the network.
+`scraper/data/supermarkets.db`; `dump` makes the same ~150 requests and writes only files. Do not
+run any of them unless asked. `report` and `run --from-raw` are offline. Tests never touch the network.
 
 Exit codes: `0` ok, `1` partial (data stored), `2` failed, `64` usage or config error.
 
@@ -63,9 +68,11 @@ bootstrap.py (composition root) -> infrastructure (http, scrapers, sql) -> appli
 All paths below are under `scraper/src/supermarket_scraper/`.
 
 - `domain/`: immutable entities and value objects, abstract repositories, `UnitOfWork`. Pure Python, no I/O.
-- `application/`: `SyncCatalogUseCase`, `EnrichDetailsUseCase` (which the sync reuses for details)
-  and the ports `CatalogSource` and `Clock`.
-- `infrastructure/`: `http/client.py` (retrying, rate-limited `AsyncJsonClient`), `scrapers/`
+- `application/`: `SyncCatalogUseCase`, `EnrichDetailsUseCase` (which the sync reuses for details),
+  `BuildPriceReportUseCase` (read-only) and the ports `CatalogSource` and `Clock`.
+- `infrastructure/`: `http/client.py` (retrying, rate-limited `AsyncJsonClient`), `http/archive.py`
+  (raw JSON recording and replay as httpx transports, wired by `Container.recording` /
+  `Container.replaying` in `bootstrap.py`), `scrapers/`
   (`base.py` template method, `registry.py`, one package per chain), `persistence/` (SQLAlchemy Core).
 - `bootstrap.py`: the only place concrete classes are wired. `config.py`: typed settings from env or `.env`.
   Exception: `infrastructure/persistence/migrations/env.py` is a developer-only second entry point.

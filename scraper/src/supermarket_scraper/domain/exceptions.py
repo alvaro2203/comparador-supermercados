@@ -24,3 +24,7 @@ class EmptyCatalogError(ScraperError):
 
 class UnknownSupermarketError(DomainError):
     """Raised when a supermarket code has no registered scraper."""
+
+
+class NoPriceDataError(DomainError):
+    """Raised when a report is asked for a supermarket or day with no stored prices."""
