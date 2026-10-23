@@ -218,8 +218,12 @@ estar resuelto **antes de crear la `0002`**.
     descarga un run normal (también las fichas), y `run --from-raw <carpeta>` lo procesa sin red con
     la fecha del volcado. Se guarda en `data/raw/<cadena>/<fecha>/` byte a byte, con `manifest.json`.
     Unos 6-10 MB al día sin comprimir.
-  - **Sin verificar contra la API real:** no se ha lanzado `dump` (son ~150 peticiones); lo cubren
-    los tests con `FakeApi`. Si el tamaño molesta, se puede comprimir con gzip más adelante.
+  - **Verificado contra la API real (2026-10-23):** `dump` guardó las 152 páginas de categorías y
+    `run --from-raw ... --dry-run` las procesó sin red: 622 categorías, 4274 productos, 0 errores.
+    Si el tamaño molesta, se puede comprimir con gzip más adelante.
+  - **Pendiente menor:** al reprocesar, el reloj congelado hace que la ejecución dure "0.0s" y que
+    `history` la muestre con la hora de la captura. Se podría medir la duración con el reloj real
+    y usar el congelado solo para el día de los precios.
 - [ ] **Copia de seguridad diaria** de `supermarkets.db` antes de cada ejecución, rotando las copias
   como los logs. El histórico no se puede volver a descargar.
 - [ ] **Segunda cadena** (Carrefour, DIA…), con el skill `add-supermarket`. Es la prueba real de que el
