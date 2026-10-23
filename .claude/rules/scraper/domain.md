@@ -28,7 +28,8 @@ paths:
   of one chain (variants such as whole and sliced bread). Treat any change to either as a
   breaking change for the comparator.
 - Extend `MeasureUnit.parse` aliases (and `_SUB_UNITS` for `g`, `ml`, `cl`...) instead of
-  special-casing units in a scraper. `Price.reference_amount` is per base unit, always.
+  special-casing units in a scraper. `Price.reference_amount` is per base unit (kg, l, unit, m,
+  wash), always; a dozen is 12 units. For canned food it is per kg of drained weight, on purpose.
 - Price changes are classified only through `Price.change_from` (`PriceChangeKind`) and counted with
   `PriceChangeCounts`. Products are shown to people through `Product.label`, never the bare name.
 

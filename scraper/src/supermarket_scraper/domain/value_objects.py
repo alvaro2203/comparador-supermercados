@@ -43,6 +43,7 @@ class MeasureUnit(StrEnum):
     UNIT = "unit"
     DOZEN = "dozen"
     METRE = "m"
+    WASH = "wash"
     UNKNOWN = "unknown"
 
     @classmethod
@@ -57,10 +58,11 @@ class MeasureUnit(StrEnum):
     def parse_quantity(cls, raw: str | None) -> tuple[Decimal, MeasureUnit]:
         """Split a reference format such as ``100 g`` into a quantity of a base unit.
 
-        ``100 g`` is ``(0.1, KILOGRAM)``, ``75 cl`` is ``(0.75, LITRE)`` and ``12 ud``
-        is ``(12, UNIT)``. Dividing a reference price by the quantity gives a price per
-        kilogram, litre, unit, dozen or metre, comparable across products and chains
-        whatever size each one quotes. Anything unrecognised is ``(1, UNKNOWN)``.
+        ``100 g`` is ``(0.1, KILOGRAM)``, ``75 cl`` is ``(0.75, LITRE)``, and both
+        ``12 ud`` and a dozen (``dz``) are ``(12, UNIT)``. Dividing a reference price by
+        the quantity gives a price per kilogram, litre, unit, metre or wash (detergents
+        are quoted per ``lv``, lavado), comparable across products and chains whatever
+        size each one quotes. Anything unrecognised is ``(1, UNKNOWN)``.
         """
         match = _REFERENCE_FORMAT.fullmatch(raw.strip().lower()) if raw else None
         if match is None:
@@ -93,6 +95,9 @@ _UNIT_ALIASES: Final[dict[str, MeasureUnit]] = {
     "dozen": MeasureUnit.DOZEN,
     "m": MeasureUnit.METRE,
     "metro": MeasureUnit.METRE,
+    "lv": MeasureUnit.WASH,
+    "lavado": MeasureUnit.WASH,
+    "lavados": MeasureUnit.WASH,
 }
 
 _SUB_UNITS: Final[dict[str, tuple[MeasureUnit, Decimal]]] = {
@@ -102,6 +107,9 @@ _SUB_UNITS: Final[dict[str, tuple[MeasureUnit, Decimal]]] = {
     "ml": (MeasureUnit.LITRE, Decimal("0.001")),
     "cl": (MeasureUnit.LITRE, Decimal("0.01")),
     "cm": (MeasureUnit.METRE, Decimal("0.01")),
+    "dz": (MeasureUnit.UNIT, Decimal(12)),
+    "dc": (MeasureUnit.UNIT, Decimal(12)),
+    "docena": (MeasureUnit.UNIT, Decimal(12)),
 }
 _REFERENCE_FORMAT: Final = re.compile(r"(?:([0-9]+(?:[.,][0-9]+)?)\s*)?([a-z]+\.?)")
 

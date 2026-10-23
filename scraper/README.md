@@ -168,10 +168,17 @@ A change of size is a new GTIN and therefore a different product, never a succes
 by reference price. Each `run` computes the links after fetching details.
 
 **Reference price.** `reference_amount` is always a price per base unit (`reference_unit`: kg, l,
-unit, dozen or m), so it compares products of any size and any chain. Chains quote it per
-`100 g`, `75 cl` or `12 ud`; `MeasureUnit.parse_quantity` turns that into a quantity of the base
-unit and the scraper divides by it (Mercadona's orégano: 4,00 €/100 g becomes 40,00 €/kg).
-Comparisons and alerts across products must use `reference_amount`, never the shelf `amount`.
+unit, m or wash), so it compares products of any size and any chain. Chains quote it per
+`100 g`, `75 cl`, `12 ud` or per dozen (`dz`); `MeasureUnit.parse_quantity` turns that into a
+quantity of the base unit and the scraper divides by it (Mercadona's orégano: 4,00 €/100 g becomes
+40,00 €/kg; eggs at 2,625 €/dozen become 0,21875 €/unit). Detergents are quoted per wash (`lv`,
+lavado), which is their legal reference unit in Spain. Comparisons and alerts across products must
+use `reference_amount`, never the shelf `amount`.
+
+For canned and jarred food the reference is per kg of **drained weight**, the legal one, so it
+differs from Mercadona's `bulk_amount` (per kg of gross weight). Olives at 1,05 € for 350 g with
+150 g drained are 3,00 €/kg gross but 7,00 €/kg drained; `reference_amount` holds the 7,00. Do not
+"fix" it to match `bulk_amount`: about 200 such products are expected to differ.
 Snapshots taken before this fix for formats quoted per `100 g` or `100 ml` (about 530 a day, 18-23
 October 2026) keep `reference_unit = 'unknown'` and their per-100 value: they are not comparable.
 
@@ -373,7 +380,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 129 tests, ~94% branch coverage
+uv run pytest --cov         # 134 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 
