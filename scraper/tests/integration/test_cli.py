@@ -5,8 +5,10 @@ import dataclasses
 import json
 from datetime import UTC, date, datetime
 from functools import partial
+from importlib.metadata import version
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from sqlalchemy import select
 
 from supermarket_scraper.application.sync_catalog import SyncCatalogUseCase, SyncOptions
@@ -23,8 +25,6 @@ from tests.conftest import BASE_URL, FixedClock
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-
-    import pytest
 
     from supermarket_scraper.config import Settings
     from supermarket_scraper.infrastructure.scrapers.mercadona.scraper import MercadonaScraper
@@ -67,6 +67,16 @@ def test_init_db_list_and_history(
 
     assert main(["history", "mercadona"]) == ExitCode.OK
     assert "No runs recorded" in capsys.readouterr().out
+
+
+def test_version_prints_the_installed_package_version(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--version"])
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out == f"supermarket-scraper {version('supermarket-scraper')}\n"
 
 
 def test_unknown_supermarket_is_a_usage_error(

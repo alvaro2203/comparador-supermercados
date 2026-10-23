@@ -23,6 +23,7 @@ supermarket-scraper = "supermarket_scraper.presentation.cli:main"
 
 [dependency-groups]
 dev = [
+    "commitizen>=4.19.2",
     "mypy>=1.11",
     "pre-commit>=3.7",
     "pytest>=8.2",
@@ -114,3 +115,14 @@ branch = true
 show_missing = true
 skip_covered = true
 exclude_also = ["if TYPE_CHECKING:", "@abstractmethod", "raise NotImplementedError"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "uv"
+version_scheme = "pep440"
+tag_format = "v$version"
+major_version_zero = true
+annotated_tag = true
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+changelog_incremental = true

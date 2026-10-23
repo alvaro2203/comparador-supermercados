@@ -34,11 +34,21 @@ uv run pytest --cov --cov-fail-under=90    # what CI runs
 
 CI (`.github/workflows/ci.yml`, Linux + Windows) runs, in order: `ruff format --check`,
 `ruff check`, `mypy`, `pytest --cov --cov-fail-under=90`. Run all four before finishing a change.
-Pre-commit runs the same format, lint and type checks.
+Pre-commit runs the same format, lint and type checks, and a `commit-msg` hook (`cz check`) that
+rejects messages that are not [Conventional Commits](https://www.conventionalcommits.org/).
+
+Versioning (Commitizen, config in `[tool.commitizen]`): the version is computed from the commit
+types, never edited by hand. Releases are cut by the user, not by Claude:
+
+```powershell
+uv run cz bump --dry-run     # preview the next version and changelog entry (safe)
+uv run cz bump               # needs a clean tree: commits with -a, tags vX.Y.Z, updates CHANGELOG.md
+```
 
 Running the app:
 
 ```powershell
+uv run supermarket-scraper --version          # installed version
 uv run supermarket-scraper init-db            # create or migrate the schema (run also does it)
 uv run supermarket-scraper list               # registered chains
 uv run supermarket-scraper run --dry-run      # full scrape, writes nothing

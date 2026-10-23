@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from enum import IntEnum
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 logger: Final = logging.getLogger("supermarket_scraper.cli")
 
 MAX_LISTED_FAILURES: Final = 20
+DISTRIBUTION: Final = "supermarket-scraper"
 
 
 class ExitCode(IntEnum):
@@ -53,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="supermarket-scraper",
         description="Download supermarket catalogs and keep a daily price history.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version(DISTRIBUTION)}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("init-db", help="Create or upgrade the database schema (idempotent).")

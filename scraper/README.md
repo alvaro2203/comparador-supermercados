@@ -90,7 +90,9 @@ comparador-supermercados/          # repository root
 ├── .github/workflows/ci.yml        # Linux + Windows CI (working directory: scraper/)
 └── scraper/
     ├── pyproject.toml                  # deps + Ruff (ALL rules) + mypy --strict + pytest + coverage
+    │                                   # + Commitizen (version and changelog)
     ├── uv.lock                         # reproducible dependency lock
+    ├── CHANGELOG.md                    # written by `cz bump` (from the first release on)
     ├── alembic.ini                     # Alembic command line, for developers only
     ├── .env.example                    # every setting, documented
     ├── Dockerfile
@@ -257,6 +259,7 @@ uv run supermarket-scraper history mercadona
 
 | Command | Description |
 |---|---|
+| `--version` | Print the installed version (see "Versioning and releases"). |
 | `init-db` | Create the schema or apply pending migrations (idempotent; `run` also does this automatically). |
 | `list` | List registered supermarkets. |
 | `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. `--save-raw` also archives every downloaded JSON (see below). `--from-raw DIR` processes an archive instead of the network. |
@@ -459,12 +462,55 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 159 tests, ~95% branch coverage
-uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
+uv run pytest --cov         # 160 tests, ~95% branch coverage
+uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 
 The code uses Python 3.12 generics and `@override` throughout. Docstrings are mandatory (Google
 style, enforced by Ruff) and there are no inline comments.
+
+### Versioning and releases
+
+The version lives in `pyproject.toml` (`[project] version`) and follows
+[Semantic Versioning](https://semver.org/). Nobody edits it by hand:
+[Commitizen](https://commitizen-tools.github.io/commitizen/) derives it from the commit history,
+which therefore must follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<optional scope>): <description>
+
+feat(report): add the day-over-day price report
+fix: parse reference prices quoted per 100 g
+feat!: rename the products table        # "!" or a "BREAKING CHANGE:" footer
+```
+
+Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`,
+`revert` and `bump`. After `pre-commit install` (it installs the `commit-msg` hook too), a commit
+whose message does not match is rejected. Merge, revert and `fixup!` commits are let through.
+
+| Commits since the last release | Next version while `0.x` | From `1.0.0` on |
+|---|---|---|
+| only `fix` / `refactor` / `perf` | patch: `0.2.0` → `0.2.1` | `1.2.0` → `1.2.1` |
+| at least one `feat` | minor: `0.2.0` → `0.3.0` | `1.2.0` → `1.3.0` |
+| a breaking change | minor: `0.2.0` → `0.3.0` (`major_version_zero`) | `1.2.0` → `2.0.0` |
+| only `docs`, `test`, `chore`, `build`, `ci`, `style` | no release | no release |
+
+To release, from `scraper/` and with **everything committed** (`cz bump` commits with `git commit -a`,
+so any other pending change would end up in the release commit):
+
+```powershell
+git status                         # must be clean
+uv run cz bump --dry-run           # preview: next version, tag and changelog entry
+uv run cz bump                     # write it: see below
+uv run cz bump --increment MAJOR   # force a level, e.g. 1.0.0 when the project is ready
+```
+
+`cz bump` updates the version in `pyproject.toml` and `uv.lock`, adds the release to
+`CHANGELOG.md` (only the new section; earlier ones keep any manual edits), commits them as
+`bump: version 0.1.0 → 0.2.0` and creates the annotated tag `v0.2.0`. It does not push: run
+`git push --follow-tags` when the repository has a remote. The running program reports the same
+number through `supermarket-scraper --version`, read from the installed package metadata, so there
+is no second copy of the version in the code.
 
 ---
 
