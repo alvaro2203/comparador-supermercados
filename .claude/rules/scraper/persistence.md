@@ -26,6 +26,9 @@ Switching SQLite -> PostgreSQL/MySQL must remain a change of `SCRAPER_DATABASE_U
 - Enrichment never erases data: brand, EAN and image use `coalesce(new, existing)`.
   `gtin` follows `ean` through `_gtin_following_ean`: replaced whenever a new EAN is written
   (NULL if that EAN is invalid), kept otherwise. Never write one without the other.
+- `replaced_by_product_id` is only ever set on inactive products, by `link_successors` (same `gtin`,
+  single candidate, first seen after the delisted one was last seen). `_product_row` resets it to
+  NULL, so reactivating a product clears its link. Never add a unique constraint on `gtin`.
 - Repositories map rows to domain objects and back. Rows, `Row` mappings and SQLAlchemy types
   never leave this package.
 

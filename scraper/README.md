@@ -145,7 +145,7 @@ comparador-supermercados/          # repository root
 |---|---|
 | `supermarkets` | One row per chain (`code` PK, e.g. `mercadona`). |
 | `categories` | Full tree per chain (`external_id`, `parent_external_id`, `level`, `is_active`). |
-| `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens) and `gtin`. |
+| `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens), `gtin` and, on a delisted product, `replaced_by_product_id`. |
 | `product_categories` | Many-to-many: a product can appear under several categories. |
 | `price_snapshots` | **Price history**, one row per product per day: shelf price, reference price per kg/l/unit, previous price, promotion flag, VAT. |
 | `scrape_runs` | Audit log of every execution with counters and errors. |
@@ -155,6 +155,17 @@ digits (`normalize_gtin` in `domain/value_objects.py`), so an EAN-8, a UPC-A wit
 leading zero and an EAN-13 compare equal. It is NULL when there is no EAN or the EAN fails its
 check digit, so `ean IS NOT NULL AND gtin IS NULL` lists invalid codes. `gtin` is indexed: it is
 the key for matching the same product across chains in the comparator.
+
+`gtin` is **not unique within a chain**. Mercadona sells some loaves whole and sliced as two
+products (`9638.1` and `9638.2`) with the same EAN, size and price. The comparator returns every
+product of a `gtin` as variants; it never picks one.
+
+`replaced_by_product_id` handles a chain relisting the same article under a new id. On a delisted
+product, it points at the only active product with the same `gtin` first seen after the delisted
+one was last seen. Siblings that share a `gtin` while both are listed are never linked, an
+ambiguous match (two candidates) is left unlinked, and a product that comes back loses its link.
+A change of size is a new GTIN and therefore a different product, never a successor: compare those
+by reference price. Each `run` computes the links after fetching details.
 
 #### Migrations
 
@@ -341,7 +352,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 84 tests, ~94% branch coverage
+uv run pytest --cov         # 93 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 

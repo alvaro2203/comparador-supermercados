@@ -24,7 +24,8 @@ paths:
 - `external_id` is the chain's own identifier, always `str`. Surrogate database ids never appear here.
 - `ean` is the code as the chain publishes it (digits only). The cross-chain matching key is its
   `gtin` property, from `normalize_gtin`: left-padded to 14 digits, `None` if the check digit fails.
-  Migration `0002` holds a frozen copy of that function. Treat any change to either as a
+  Migration `0002` holds a frozen copy of that function. A `gtin` can belong to several products
+  of one chain (variants such as whole and sliced bread). Treat any change to either as a
   breaking change for the comparator.
 - Extend `MeasureUnit.parse` aliases instead of special-casing units in a scraper.
 

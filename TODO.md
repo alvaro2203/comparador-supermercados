@@ -107,23 +107,38 @@ estar resuelto **antes de crear la `0002`**.
 
 ## P2 · Calidad de los datos
 
-- [ ] **EAN compartidos por varios productos de una misma cadena.**
+- [x] **EAN compartidos por varios productos de una misma cadena.**
   - **Situación:** 13 EAN aparecen en 2 productos cada uno (26 en total). Son panes de la panadería:
     la pieza entera y su versión rebanada, con ids como `9638.1` y `9638.2`. El EAN no identifica un
     producto único dentro de Mercadona.
   - **Hacer:** comprobar si pasa solo con el pan o también en otras categorías. Decidir cómo trata el
     comparador un `gtin` con varios productos (devolver todos, o elegir por nombre y formato) y
     dejarlo documentado antes de cruzar con la segunda cadena.
-- [ ] **Productos activos cuya ficha devuelve 404.**
+  - **Comprobado (23 oct):** solo pasa en la panadería. Son 13 pares `X.1`/`X.2` (entero y
+    rebanado) con el mismo EAN, el mismo tamaño y siempre el mismo precio.
+  - **Decidido:** el comparador devuelve todos los productos de un `gtin` como variantes. Documentado
+    en README, CLAUDE.md y las reglas; un test fija que `gtin` no es único.
+- [x] **Productos activos cuya ficha devuelve 404.**
   - **Situación:** el `8300` está en el catálogo pero su ficha no existe. Cada `run` lo vuelve a
     pedir entre sus 500 diarios, y `enrich` también.
   - **Hacer:** decidir qué hacer con los productos sin ficha (marcarlos, o dejar de reintentarlos
     durante unos días). Mientras haya pocos, no es urgente.
-- [ ] **Productos sustituidos por otro identificador.**
+  - **Decidido: no hacer nada.** El 8300 dio 404 el 21 de octubre y ese mismo día Mercadona lo
+    retiró del catálogo: el 404 era el aviso previo a la retirada. El 23 de octubre no queda ningún
+    producto activo sin ficha. Reabrir si los fallos de `Detail enrichment failure` se acumulan.
+- [x] **Productos sustituidos por otro identificador.**
   - **Situación:** la «Papilla 8 cereales con galleta María Nestlé» se retiró con el id `35602` y
     reapareció con el id `18497` y otra imagen. El histórico de precios queda partido en dos productos.
   - **Hacer:** detectar sucesores (mismo EAN o, si falta, el mismo nombre y formato el mismo día) y
     enlazarlos, por ejemplo con `replaced_by_product_id`.
+  - **Comprobado (23 oct):** la papilla no es el mismo artículo: pasó de 725 g a 480 g y cambió de
+    EAN. Los otros 4 candidatos por nombre (napolitana 130 → 147 g, refresco, pañales) también
+    cambian de tamaño y de EAN. Según GS1, otro tamaño es otro producto.
+  - **Hecho:** columna `products.replaced_by_product_id` (migración `0003`) que cada `run` rellena
+    solo cuando un producto retirado y uno nuevo comparten `gtin` (un único candidato, visto por
+    primera vez después de la última vez que se vio el retirado). Por nombre no se enlaza. Con los
+    datos actuales da 0 enlaces. Los cambios de tamaño se comparan por precio de referencia (otra
+    tarea de P2).
 - [ ] **`is_new_arrival` nunca está activo con datos reales.**
   - **Situación:** el 20 de octubre aparecieron 9 productos nuevos y ninguno trae `is_new = true`. La
     fixture de los tests sí trae uno.
