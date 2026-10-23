@@ -37,6 +37,10 @@ async def test_fetch_catalog_normalizes_tree_products_and_prices(
     assert oil.product.packaging.selling_method is SellingMethod.UNIT
 
     assert listings["4749"].product.is_new_arrival
+    assert not oil.product.is_new_arrival
+    pepper = listings["15061"].price
+    assert pepper.reference_amount == Decimal("29.000")
+    assert pepper.reference_unit is MeasureUnit.KILOGRAM
     salt = listings["34008"]
     assert salt.price.previous_amount is None
     assert salt.product.packaging.is_pack
@@ -109,3 +113,19 @@ async def test_fetch_product_details_cleans_html_and_isolates_missing(
 def test_mercadona_is_discovered_by_registry() -> None:
     discover_scrapers()
     assert "mercadona" in default_registry.codes()
+
+
+async def test_product_without_its_new_arrival_flag_is_schema_drift(
+    make_scraper: Callable[[], MercadonaScraper], fake_api: FakeApi
+) -> None:
+    page = cast(
+        "dict[str, list[dict[str, list[dict[str, object]]]]]",
+        fake_api.responses["/api/categories/115/"],
+    )
+    del page["categories"][0]["products"][0]["is_new_arrival"]
+    async with make_scraper() as scraper:
+        snapshot = await scraper.fetch_catalog()
+
+    assert len(snapshot.failures) == 1
+    assert "is_new_arrival" in snapshot.failures[0].reason
+    assert "15061" not in {item.product.external_id for item in snapshot.listings}

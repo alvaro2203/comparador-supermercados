@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import func, select
 
 from supermarket_scraper.application.sync_catalog import SyncCatalogUseCase, SyncOptions
-from supermarket_scraper.domain.entities import RunStatus
+from supermarket_scraper.domain.entities import PriceChangeCounts, RunStatus
 from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.persistence import tables as schema
 from supermarket_scraper.infrastructure.persistence.repositories import SqlProductRepository
@@ -67,6 +67,7 @@ async def test_first_run_persists_full_catalog(
     assert run.stats.categories == 6
     assert run.stats.details_enriched == 4
     assert run.stats.price_changes == 0
+    assert run.stats.price_change_kinds == PriceChangeCounts()
     assert count(engine, schema.product_categories) == 5
     assert oil_price(engine) == [("2026-10-01", Decimal("8.9500"))]
 
@@ -100,6 +101,10 @@ async def test_daily_runs_build_price_history_and_detect_changes(
 
     assert second.run.stats.new_products == 0
     assert second.run.stats.price_changes == 1
+    assert second.run.stats.price_change_kinds == PriceChangeCounts(promotions_ended=1)
+    with uow_factory() as uow:
+        stored = uow.runs.latest(SupermarketCode("mercadona"), 1)[0]
+    assert stored.stats.price_change_kinds == PriceChangeCounts(promotions_ended=1)
     assert oil_price(engine) == [
         ("2026-10-01", Decimal("8.9500")),
         ("2026-10-02", Decimal("9.4500")),
@@ -327,3 +332,31 @@ async def test_successor_linking_crash_keeps_the_run_partial(
     assert report.run.status is RunStatus.PARTIAL
     assert report.run.stats.errors == 1
     assert count(engine, schema.price_snapshots) == 4
+
+
+async def test_regular_price_moves_are_told_apart_from_promotions(
+    make_scraper: Callable[[], MercadonaScraper],
+    uow_factory: Callable[[], UnitOfWork],
+    clock: FixedClock,
+    fake_api: FakeApi,
+) -> None:
+    use_case = SyncCatalogUseCase(uow_factory, clock, SyncOptions(fetch_details=False))
+    async with make_scraper() as source:
+        await use_case.execute(source)
+
+    page = cast("Page", fake_api.responses["/api/categories/112/"])
+    oil, garrafa = page["categories"][0]["products"]
+    salt = page["categories"][1]["products"][0]
+    cast("dict[str, object]", oil["price_instructions"]).update(unit_price="8.50")
+    cast("dict[str, object]", garrafa["price_instructions"]).update(unit_price="37.95")
+    cast("dict[str, object]", salt["price_instructions"]).update(
+        unit_price="0.30", price_decreased=True, previous_unit_price="0.35"
+    )
+    clock.advance()
+    async with make_scraper() as source:
+        report = await use_case.execute(source)
+
+    assert report.run.stats.price_changes == 3
+    assert report.run.stats.price_change_kinds == PriceChangeCounts(
+        increased=1, decreased=1, promotions_started=1
+    )

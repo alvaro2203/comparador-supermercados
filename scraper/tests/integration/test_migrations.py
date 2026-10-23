@@ -370,13 +370,13 @@ def test_gtin_migration_backfills_valid_eans_and_survives_a_round_trip(tmp_path:
             ],
         )
 
-    upgrade_schema(baseline)
+    migrate_to(baseline, "0002")
 
     expected = {"4241": None, "nutella": "00000080177173", "typo": None}
     assert stored_gtins(baseline) == expected
     downgrade_to(baseline, BASELINE_REVISION)
     assert "gtin" not in {column["name"] for column in inspect(baseline).get_columns("products")}
-    upgrade_schema(baseline)
+    migrate_to(baseline, "0002")
     assert stored_gtins(baseline) == expected
     assert count_snapshots(baseline) == 1
     baseline.dispose()

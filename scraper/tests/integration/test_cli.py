@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import dataclasses
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from supermarket_scraper.bootstrap import Container, build_container
-from supermarket_scraper.infrastructure.persistence.database import build_engine
+from supermarket_scraper.domain.entities import RunStats, ScrapeRun, Supermarket
+from supermarket_scraper.domain.value_objects import SupermarketCode
+from supermarket_scraper.infrastructure.persistence.database import build_engine, upgrade_schema
 from supermarket_scraper.infrastructure.persistence.tables import supermarkets
+from supermarket_scraper.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from supermarket_scraper.presentation import cli
 from supermarket_scraper.presentation.cli import ExitCode, main
 from tests.conftest import BASE_URL
@@ -206,3 +210,35 @@ def test_enrich_report_lists_a_bounded_number_of_failures(
     output = capsys.readouterr().out
     assert output.count("returned 404") == 2
     assert "and 1 more (see the log for all of them)" in output
+
+
+def test_run_report_and_history_break_price_changes_down(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fake_api: FakeApi,
+) -> None:
+    use_database(monkeypatch, tmp_path)
+    route_scrapers_to(monkeypatch, fake_api)
+    engine = build_engine(f"sqlite:///{tmp_path / 'cli.db'}")
+    upgrade_schema(engine)
+    code = SupermarketCode("mercadona")
+    legacy_at = datetime(2026, 9, 30, 6, 0, tzinfo=UTC)
+    with SqlAlchemyUnitOfWork(engine) as uow:
+        uow.supermarkets.upsert(
+            Supermarket(code=code, name="Mercadona", website="https://tienda.mercadona.es")
+        )
+        uow.runs.save(ScrapeRun.start(code, legacy_at).complete(legacy_at, RunStats()))
+        uow.commit()
+    engine.dispose()
+
+    assert main(["run", "mercadona", "--no-details"]) == ExitCode.OK
+    report = capsys.readouterr().out
+    assert "    increases      0" in report
+    assert "    promo ended    0" in report
+
+    assert main(["history", "mercadona"]) == ExitCode.OK
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split()[-5:] == ["up", "down", "promo+", "promo-", "errors"]
+    assert lines[2].split()[-5:] == ["0", "0", "0", "0", "0"]
+    assert lines[3].split()[-5:] == ["-", "-", "-", "-", "0"]

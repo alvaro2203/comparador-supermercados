@@ -14,6 +14,7 @@
           "published": true,
           "share_url": "https://tienda.mercadona.es/product/15061/pimienta-negra-molida-hacendado",
           "thumbnail": "https://prod-mercadona.imgix.net/images/15061.jpg",
+          "is_new_arrival": false,
           "display_name": "Pimienta negra molida Hacendado",
           "unavailable_from": "2026-10-20",
           "price_instructions": {
@@ -27,8 +28,8 @@
             "size_format": "kg",
             "selling_method": 0,
             "price_decreased": false,
-            "reference_price": "29.000",
-            "reference_format": "kg"
+            "reference_price": "2.900",
+            "reference_format": "100 g"
           }
         },
         {
@@ -36,6 +37,7 @@
           "slug": "aceite-oliva-virgen-extra-hacendado-botella",
           "packaging": "Botella",
           "published": true,
+          "is_new_arrival": false,
           "display_name": "Aceite de oliva virgen extra Hacendado",
           "price_instructions": {
             "unit_price": "8.95",

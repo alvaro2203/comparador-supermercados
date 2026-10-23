@@ -8,6 +8,8 @@ import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, select
 from sqlalchemy.exc import StatementError
 
+from supermarket_scraper.domain.entities import RunStats, ScrapeRun, Supermarket
+from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.persistence.column_types import ExactDecimal, UtcDateTime
 from supermarket_scraper.infrastructure.persistence.upsert import (
     PortableUpsert,
@@ -17,7 +19,11 @@ from supermarket_scraper.infrastructure.persistence.upsert import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sqlalchemy import Engine
+
+    from supermarket_scraper.domain.repositories import UnitOfWork
 
 metadata = MetaData()
 sample = Table(
@@ -84,3 +90,22 @@ def test_upsert_inserts_then_updates(engine: Engine, *, portable: bool) -> None:
         (1, "b", Decimal(1)),
         (2, "c", Decimal(2)),
     ]
+
+
+def test_run_recorded_before_the_price_change_breakdown_reads_back_without_it(
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    code = SupermarketCode("mercadona")
+    started = datetime(2026, 10, 1, 6, 0, tzinfo=UTC)
+    legacy = ScrapeRun.start(code, started).complete(started, RunStats(price_changes=5))
+    with uow_factory() as uow:
+        uow.supermarkets.upsert(
+            Supermarket(code=code, name="Mercadona", website="https://tienda.mercadona.es")
+        )
+        uow.runs.save(legacy)
+        uow.commit()
+
+    with uow_factory() as uow:
+        stored = uow.runs.latest(code, 1)[0]
+    assert stored.stats.price_changes == 5
+    assert stored.stats.price_change_kinds is None
