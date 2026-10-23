@@ -139,26 +139,55 @@ estar resuelto **antes de crear la `0002`**.
     primera vez después de la última vez que se vio el retirado). Por nombre no se enlaza. Con los
     datos actuales da 0 enlaces. Los cambios de tamaño se comparan por precio de referencia (otra
     tarea de P2).
-- [ ] **`is_new_arrival` nunca está activo con datos reales.**
+- [x] **`is_new_arrival` nunca está activo con datos reales.**
   - **Situación:** el 20 de octubre aparecieron 9 productos nuevos y ninguno trae `is_new = true`. La
     fixture de los tests sí trae uno.
   - **Hacer:** investigar con el agente `supermarket-api-researcher` si Mercadona ha dejado de enviar
     el campo o lo envía en otro sitio. Mientras tanto, calcular las «novedades» a partir de
     `first_seen_at`.
-- [ ] **Nombres repetidos.**
+  - **Causa (23 oct):** fallo del scraper. Mercadona sí marca las novedades, pero en el campo
+    `is_new_arrival` del producto; el scraper leía `price_instructions.is_new`, que siempre viene a
+    `false`. Comprobado con 4 páginas reales (26 novedades). No hizo falta el agente.
+  - **Hecho:** el scraper lee `is_new_arrival`, obligatorio en el esquema (si desaparece, sale como
+    `SourceSchemaError`, no como un `false` silencioso). Fixtures corregidas a la forma real.
+    `is_new_arrival` es el distintivo de Mercadona (dura semanas); `first_seen_at` es cuándo lo vimos
+    por primera vez. Los productos actuales se marcarán en el próximo `run`.
+- [x] **Nombres repetidos.**
   - **Situación:** varios aceites Hacendado comparten nombre (hasta 3 productos con «Aceite de oliva
     virgen extra Hacendado»). Seguramente son tamaños distintos, pero no está comprobado.
   - **Hacer:** confirmarlo, y que cualquier listado muestre siempre el nombre junto con el formato
     (`packaging`, `unit_size`).
-- [ ] **Distinguir los cambios de precio reales de las promociones.**
+  - **Confirmado (23 oct):** 262 nombres repetidos en 631 productos activos; ninguno con la misma
+    presentación.
+  - **Hecho:** `Product.label` («Aceite de oliva virgen extra Hacendado (Garrafa 5 l)», «(Pack-6 6 x
+    1,5 l)», «(Paquete 26 ud)»). Con el catálogo real da 4.275 etiquetas distintas para 4.275
+    productos activos. Documentado como la forma obligatoria de mostrar un producto.
+- [x] **Distinguir los cambios de precio reales de las promociones.**
   - **Situación:** hubo 80 cambios en dos días (53 subidas y 27 bajadas, +2,4 % de media). El contador
     `price_changes` no separa una subida de tarifa de la entrada o salida de una promoción.
   - **Hacer:** clasificar cada cambio (tarifa, inicio de promoción, fin de promoción) y guardarlo en
     `scrape_runs` o calcularlo al consultar.
-- [ ] **Comparar por precio de referencia.**
+  - **Hecho:** `Price.change_from` clasifica en subida, bajada, inicio y fin de promoción. Cada `run`
+    guarda el desglose en `scrape_runs` (migración `0004`) y lo muestran el informe y `history`
+    (columnas `up`, `down`, `promo+`, `promo-`; `-` en ejecuciones anteriores).
+  - **Resultado con los datos guardados:** del 18 al 20 de octubre, los 80 cambios fueron 35 subidas,
+    16 bajadas, 11 promociones que empiezan y 18 que acaban. De las «53 subidas» que conté al
+    principio, 18 eran solo el fin de una promoción.
+- [x] **Comparar por precio de referencia.**
   - **Situación:** el aguacate (−29 %) y el calabacín (−28 %) son producto fresco y oscilan mucho.
   - **Hacer:** que las comparaciones y alertas usen `reference_amount` (€/kg, €/l) en lugar del precio
     del envase.
+  - **Fallo encontrado (23 oct):** unos 530 precios al día (12 %) tenían `reference_unit = unknown`.
+    Mercadona da la referencia «por 100 g» o «por 100 ml» en envases pequeños, y el parser no lo
+    entendía: el orégano quedaba con 4,00 «por algo» en lugar de 40,00 €/kg.
+  - **Hecho:** `MeasureUnit.parse_quantity` («100 g» → 0,1 kg, «75 cl», «12 ud»...) y el scraper
+    divide por esa cantidad, así que `reference_amount` es siempre por kg, l, unidad, docena o metro.
+    Verificado con 214 productos reales: ninguno `unknown` y coincide con el `bulk_price` de
+    Mercadona. Documentado que comparaciones y alertas usan `reference_amount`; aún no existen, se
+    aplicará en `report`, la API y las alertas.
+  - **No hecho a propósito:** no he reescrito los ~2.100 precios antiguos afectados (18-23 oct). Para
+    unos 200 no se puede saber el formato original; quedan como `unknown` (no comparables) en vez de
+    con un valor adivinado.
 
 ## P3 · Funcionalidad nueva
 

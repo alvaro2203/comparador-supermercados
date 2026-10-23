@@ -25,7 +25,11 @@ paths:
 - **parse**: validate with Pydantic models from `schemas.py`, via a helper that converts
   `ValidationError` into `SourceSchemaError` with the failing field path.
 - **normalize**: map to domain entities. Strip text, clean HTML, validate EANs, map units with
-  `MeasureUnit.parse`, prices as `Decimal`.
+  `MeasureUnit.parse`, prices as `Decimal`. A reference price goes through
+  `MeasureUnit.parse_quantity` and is divided by the quantity, so it is always per kg, l, unit,
+  dozen or m (never per `100 g`).
+- Mercadona's new-arrival badge is the product-level `is_new_arrival`. `price_instructions.is_new`
+  exists but is always `false` in real payloads; do not use it.
 - The base class isolates pages and products by catching `DomainError` only. Expected data
   problems must raise a `DomainError` subclass; anything else is a bug and should fail loudly.
 

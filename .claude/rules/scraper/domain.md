@@ -27,7 +27,10 @@ paths:
   Migration `0002` holds a frozen copy of that function. A `gtin` can belong to several products
   of one chain (variants such as whole and sliced bread). Treat any change to either as a
   breaking change for the comparator.
-- Extend `MeasureUnit.parse` aliases instead of special-casing units in a scraper.
+- Extend `MeasureUnit.parse` aliases (and `_SUB_UNITS` for `g`, `ml`, `cl`...) instead of
+  special-casing units in a scraper. `Price.reference_amount` is per base unit, always.
+- Price changes are classified only through `Price.change_from` (`PriceChangeKind`) and counted with
+  `PriceChangeCounts`. Products are shown to people through `Product.label`, never the bare name.
 
 ## Repository contracts
 

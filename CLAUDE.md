@@ -97,6 +97,8 @@ README section 5. Add recorded payloads to `tests/fixtures/<code>/` and mirror
   `SCRAPER_TIMEZONE`.
 - Delisting is a soft flag and is skipped on incomplete scrapes or when more than
   `SCRAPER_MAX_DELIST_RATIO` of the catalog vanishes. Products are never deleted.
+- `price_snapshots.reference_amount` is per base unit (kg, l, unit...): compare products by it,
+  never by the shelf `amount`. Show products with `Product.label` (name plus presentation).
 - `gtin` is not unique within a chain (bread sold whole and sliced shares it). A delisted product
   relisted under a new id with the same `gtin` is linked through `replaced_by_product_id`.
 

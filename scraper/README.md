@@ -148,7 +148,7 @@ comparador-supermercados/          # repository root
 | `products` | Current state of each product: name, packaging, size, URLs, availability, `is_new_arrival`, `is_active`, `first_seen_at` / `last_seen_at` / `delisted_at`, plus detail data (EAN, brand, origin, ingredients, allergens), `gtin` and, on a delisted product, `replaced_by_product_id`. |
 | `product_categories` | Many-to-many: a product can appear under several categories. |
 | `price_snapshots` | **Price history**, one row per product per day: shelf price, reference price per kg/l/unit, previous price, promotion flag, VAT. |
-| `scrape_runs` | Audit log of every execution with counters and errors. |
+| `scrape_runs` | Audit log of every execution with counters and errors, including the price changes broken down into regular increases and decreases and promotions started and ended (NULL for runs recorded before migration `0004`). |
 
 `ean` keeps the code exactly as the chain publishes it. `gtin` is the same code left-padded to 14
 digits (`normalize_gtin` in `domain/value_objects.py`), so an EAN-8, a UPC-A with or without its
@@ -166,6 +166,27 @@ one was last seen. Siblings that share a `gtin` while both are listed are never 
 ambiguous match (two candidates) is left unlinked, and a product that comes back loses its link.
 A change of size is a new GTIN and therefore a different product, never a successor: compare those
 by reference price. Each `run` computes the links after fetching details.
+
+**Reference price.** `reference_amount` is always a price per base unit (`reference_unit`: kg, l,
+unit, dozen or m), so it compares products of any size and any chain. Chains quote it per
+`100 g`, `75 cl` or `12 ud`; `MeasureUnit.parse_quantity` turns that into a quantity of the base
+unit and the scraper divides by it (Mercadona's orégano: 4,00 €/100 g becomes 40,00 €/kg).
+Comparisons and alerts across products must use `reference_amount`, never the shelf `amount`.
+Snapshots taken before this fix for formats quoted per `100 g` or `100 ml` (about 530 a day, 18-23
+October 2026) keep `reference_unit = 'unknown'` and their per-100 value: they are not comparable.
+
+**Price changes.** `Price.change_from` classifies each change against the previous observation:
+a promotion starting or ending first, otherwise a regular increase or decrease. `price_changes`
+is the total; the breakdown tells a temporary discount from a real price move.
+
+**New arrivals.** `is_new_arrival` is the chain's own "new" badge (Mercadona's product-level
+`is_new_arrival`, which marks products for a few weeks). `first_seen_at` is when this scraper first
+saw the product. They answer different questions; use the one that fits.
+
+**Product labels.** Many products share a name and differ only in presentation (262 names, 631
+Mercadona products). Any listing must show `Product.label`, the name plus
+`PackagingInfo.describe()`: "Aceite de oliva virgen extra Hacendado (Garrafa 5 l)",
+"(Pack-6 6 x 1,5 l)", "(Paquete 26 ud)". It is unique across Mercadona's active catalog.
 
 #### Migrations
 
@@ -229,7 +250,7 @@ uv run supermarket-scraper history mercadona
 | `list` | List registered supermarkets. |
 | `run [CODE ...]` | Scrape the given chains (default: all). `--dry-run` writes nothing. `--details` / `--no-details` override `SCRAPER_FETCH_DETAILS`. |
 | `enrich [CODE ...] [--limit N]` | Fetch details (EAN, brand, ingredients) for every product never enriched, or at most N per chain. Commits every 100 products, so an interrupted backfill resumes where it stopped; stops if a whole chunk fails. Prints the reason for each failed product (up to 20; every one goes to the log as `Detail enrichment failure`). Not recorded in `scrape_runs`. |
-| `history CODE [--limit N]` | Show the latest runs and their counters. |
+| `history CODE [--limit N]` | Show the latest runs and their counters, with price changes split into `up` / `down` (regular price) and `promo+` / `promo-` (promotion started / ended); `-` for runs recorded before the split existed. |
 
 Exit codes: `0` success, `1` partial (some pages or details failed, data stored), `2` failed
 (including a failed schema migration, in which case nothing is scraped), `64` usage or
@@ -352,7 +373,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 93 tests, ~94% branch coverage
+uv run pytest --cov         # 129 tests, ~94% branch coverage
 uv run pre-commit install   # run format, lint and mypy on every commit (config at the repo root)
 ```
 
