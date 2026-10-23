@@ -99,9 +99,11 @@ products: Final = Table(
     Column("first_seen_at", UtcDateTime(), nullable=False),
     Column("last_seen_at", UtcDateTime(), nullable=False),
     Column("delisted_at", UtcDateTime(), nullable=True),
+    Column("replaced_by_product_id", Integer, ForeignKey("products.id"), nullable=True),
     UniqueConstraint("supermarket_code", "external_id"),
     Index("ix_products_ean", "ean"),
     Index("ix_products_gtin", "gtin"),
+    Index("ix_products_replaced_by_product_id", "replaced_by_product_id"),
     Index("ix_products_supermarket_active", "supermarket_code", "is_active"),
 )
 

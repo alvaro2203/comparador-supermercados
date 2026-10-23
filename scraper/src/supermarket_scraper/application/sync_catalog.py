@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from supermarket_scraper.application.ports import CatalogSource, Clock
     from supermarket_scraper.domain.repositories import UnitOfWork
+    from supermarket_scraper.domain.value_objects import SupermarketCode
 
 logger: Final = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ class SyncCatalogUseCase:
             stats = self._persist_snapshot(snapshot, stats)
             if self._options.fetch_details:
                 stats = await self._enrich_details(source, stats)
+            stats = self._link_successors(supermarket.code, stats)
         except Exception as exc:
             failed = run.fail(self._clock.now(), f"{type(exc).__name__}: {exc}", stats)
             logger.exception("Catalog sync failed", extra=log_extra)
@@ -194,6 +196,23 @@ class SyncCatalogUseCase:
         return replace(
             stats, details_enriched=report.enriched, errors=stats.errors + report.failures
         )
+
+    def _link_successors(self, code: SupermarketCode, stats: RunStats) -> RunStats:
+        """Link delisted products to their relisted successor, never failing the stored day.
+
+        It runs after enrichment because a successor's GTIN is only known once its
+        details are fetched. Any error downgrades the run to partial, as enrichment does.
+        """
+        try:
+            with self._uow_factory() as uow:
+                linked = uow.products.link_successors(code)
+                uow.commit()
+        except Exception:
+            logger.exception("Successor linking failed", extra={"supermarket": str(code)})
+            return replace(stats, errors=stats.errors + 1)
+        if linked:
+            logger.info("Successors linked", extra={"supermarket": str(code), "linked": linked})
+        return stats
 
     def _save_run(self, run: ScrapeRun) -> None:
         """Persist the final state of a run without letting audit errors mask the result."""

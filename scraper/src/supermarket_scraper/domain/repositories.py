@@ -94,6 +94,17 @@ class ProductRepository(ABC):
     def apply_details(self, details: Sequence[ProductDetails], at: datetime) -> int:
         """Store detail attributes and return how many products were enriched."""
 
+    @abstractmethod
+    def link_successors(self, supermarket: SupermarketCode) -> int:
+        """Link delisted products to the product that replaced them and return how many.
+
+        A successor is the only active product with the same GTIN that was first
+        seen after the delisted one was last seen: the same article relisted under
+        a new external id. Products sharing a GTIN while both listed (for example a
+        loaf sold whole and sliced) are siblings, never successors. A product that
+        comes back to the catalog loses its link.
+        """
+
 
 class PriceRepository(ABC):
     """Persistence contract for the historical price series."""

@@ -56,6 +56,7 @@ _PRODUCT_CATALOG_COLUMNS: Final = (
     "is_active",
     "last_seen_at",
     "delisted_at",
+    "replaced_by_product_id",
 )
 
 _PRICE_COLUMNS: Final = (
@@ -300,6 +301,46 @@ class SqlProductRepository(ProductRepository):
         self._connection.execute(statement, parameters)
         return len(parameters)
 
+    @override
+    def link_successors(self, supermarket: SupermarketCode) -> int:
+        """Point unlinked delisted products at their single relisted successor."""
+        delisted = schema.products
+        relisted = schema.products.alias("relisted")
+        statement = (
+            select(delisted.c.id, relisted.c.id.label("successor_id"))
+            .join(
+                relisted,
+                and_(
+                    relisted.c.supermarket_code == delisted.c.supermarket_code,
+                    relisted.c.gtin == delisted.c.gtin,
+                    relisted.c.is_active,
+                    relisted.c.first_seen_at > delisted.c.last_seen_at,
+                ),
+            )
+            .where(
+                delisted.c.supermarket_code == str(supermarket),
+                delisted.c.is_active.is_(False),
+                delisted.c.gtin.is_not(None),
+                delisted.c.replaced_by_product_id.is_(None),
+            )
+        )
+        candidates: defaultdict[int, list[int]] = defaultdict(list)
+        for row in self._connection.execute(statement):
+            candidates[row.id].append(row.successor_id)
+        parameters = [
+            {"b_id": product_id, "b_successor_id": successor_ids[0]}
+            for product_id, successor_ids in candidates.items()
+            if len(successor_ids) == 1
+        ]
+        if parameters:
+            self._connection.execute(
+                update(delisted)
+                .where(delisted.c.id == bindparam("b_id"))
+                .values(replaced_by_product_id=bindparam("b_successor_id")),
+                parameters,
+            )
+        return len(parameters)
+
     def _update_identity_attributes(
         self, supermarket: SupermarketCode, items: Sequence[Product]
     ) -> None:
@@ -519,6 +560,7 @@ def _product_row(product: Product, seen_at: datetime) -> Row:
         "first_seen_at": seen_at,
         "last_seen_at": seen_at,
         "delisted_at": None,
+        "replaced_by_product_id": None,
     }
 
 
