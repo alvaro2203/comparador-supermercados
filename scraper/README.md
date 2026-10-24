@@ -480,9 +480,17 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 168 tests, ~95% branch coverage
+uv run pytest --cov         # 175 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
+
+The suite runs on SQLite by default. Production is PostgreSQL, so CI has a second job, `postgres`,
+that runs `tests/integration` against a throwaway PostgreSQL container. Locally, start any
+PostgreSQL on this machine and set `SCRAPER_TEST_DATABASE_URL` to it (for example
+`postgresql+psycopg://postgres:test@localhost:55432/scraper`, after
+`uv sync --extra postgres`). **The database is wiped before every test**, so the variable is
+refused unless its host is `localhost`, `127.0.0.1` or `::1`; never point it at Neon. Tests that
+check SQLite-only behaviour (batch table rebuilds, `PRAGMA`) always use SQLite.
 
 The code uses Python 3.12 generics and `@override` throughout. Docstrings are mandatory (Google
 style, enforced by Ruff) and there are no inline comments.

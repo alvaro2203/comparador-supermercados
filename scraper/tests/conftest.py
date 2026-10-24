@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import partial
@@ -10,6 +11,8 @@ from typing import TYPE_CHECKING, override
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from supermarket_scraper.application.ports import Clock
 from supermarket_scraper.infrastructure.http.client import AsyncJsonClient, HttpClientConfig
@@ -21,7 +24,7 @@ from supermarket_scraper.infrastructure.scrapers.mercadona.scraper import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
     from sqlalchemy import Engine
 
@@ -29,6 +32,8 @@ if TYPE_CHECKING:
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE_URL = "https://tienda.test"
+TEST_DATABASE_URL_ENV = "SCRAPER_TEST_DATABASE_URL"
+LOCAL_TEST_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class FixedClock(Clock):
@@ -113,12 +118,48 @@ def clock() -> FixedClock:
     return FixedClock(datetime(2026, 10, 1, 6, 0, tzinfo=UTC))
 
 
-@pytest.fixture
-def engine(tmp_path: Path) -> Iterator[Engine]:
-    db_engine = build_engine(f"sqlite:///{tmp_path / 'test.db'}")
+def local_test_database_url(environ: Mapping[str, str]) -> str | None:
+    """Return the database URL tests should use instead of SQLite, or ``None`` for SQLite.
+
+    The database is emptied before every test, so only a throwaway database on this
+    machine is accepted; anything else (Neon, a staging host) raises.
+    """
+    raw = environ.get(TEST_DATABASE_URL_ENV)
+    if not raw:
+        return None
+    host = make_url(raw).host
+    if host not in LOCAL_TEST_HOSTS:
+        msg = (
+            f"{TEST_DATABASE_URL_ENV} points at {host!r}. Tests wipe the database they use, "
+            f"so it must be on one of: {', '.join(sorted(LOCAL_TEST_HOSTS))}"
+        )
+        raise RuntimeError(msg)
+    return raw
+
+
+def migrated_engine(url: str) -> Iterator[Engine]:
+    """Yield an engine on ``url`` with an empty database at the latest migration."""
+    db_engine = build_engine(url)
+    if db_engine.dialect.name == "postgresql":
+        with db_engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
     upgrade_schema(db_engine)
     yield db_engine
     db_engine.dispose()
+
+
+@pytest.fixture
+def sqlite_engine(tmp_path: Path) -> Iterator[Engine]:
+    """A temporary SQLite database, for tests of behaviour that only SQLite has."""
+    yield from migrated_engine(f"sqlite:///{tmp_path / 'test.db'}")
+
+
+@pytest.fixture
+def engine(tmp_path: Path) -> Iterator[Engine]:
+    """The database under test: SQLite, or the local PostgreSQL named by the environment."""
+    url = local_test_database_url(os.environ) or f"sqlite:///{tmp_path / 'test.db'}"
+    yield from migrated_engine(url)
 
 
 @pytest.fixture

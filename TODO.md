@@ -41,6 +41,25 @@ No hay tareas P0 abiertas.
     tiempo y cómo se usa) y probarla una vez en una rama, sin tocar la principal. Si no basta,
     añadir un volcado periódico (`pg_dump`) como artefacto o en otro almacenamiento. Mientras tanto,
     `scraper/data/supermarkets.db` es una copia local hasta el 23 de octubre: no la borres.
+- [ ] **Tests contra PostgreSQL en el CI.**
+  - **Situación:** producción es PostgreSQL (Neon), pero el CI solo prueba en SQLite. Las migraciones
+    y los upserts se comprobaron en PostgreSQL una vez, a mano, el 24 de octubre. Una migración que
+    funcione en SQLite y falle en PostgreSQL se descubriría en la ejecución de las 05:30.
+  - **Hacer:** que el fixture `engine` use `SCRAPER_TEST_DATABASE_URL` si existe (solo hosts locales,
+    vaciada antes de cada test), una variante en PostgreSQL de la comprobación del esquema, y un job
+    `postgres` en `ci.yml` con un *service container*. Después, añadir ese check al ruleset.
+    Paso a paso: `docs/entorno-de-pruebas.md`, parte A.
+- [ ] **Base de pruebas `staging`.**
+  - **Situación:** cualquier operación sobre datos (el relleno del IVA, una migración, `copy-db`) se
+    ensaya directamente en producción, y un lanzamiento manual de una rama sin revisar puede escribir
+    en ella.
+  - **Hacer:** una rama `staging` en Neon; entornos `production` (solo desde `main`) y `staging` en
+    GitHub, cada uno con su `SCRAPER_DATABASE_URL`; y un input `target` en `daily-scrape` (por
+    defecto `staging` en los lanzamientos manuales; las programadas siguen en producción). Antes,
+    comprobar cuántas ramas permite el plan gratuito de Neon. Paso a paso:
+    `docs/entorno-de-pruebas.md`, parte B.
+  - **No se hace:** un descargador de pruebas diario. Duplicaría las peticiones a Mercadona; los
+    fixtures, `--dry-run` y `--from-raw` ya lo cubren.
 - [x] **Guardar el JSON en bruto en la ejecución diaria.**
   - **Hecho:** el workflow usa `run --save-raw` y sube los JSON como artefacto durante 14 días
     (478 KB comprimidos). Para guardarlos más tiempo, ver la tarea de comprimir y rotar en P3.

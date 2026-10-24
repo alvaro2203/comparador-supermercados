@@ -184,18 +184,20 @@ def test_pre_migration_database_is_adopted_without_losing_data(
     legacy.dispose()
 
 
-def test_batch_rebuild_of_products_keeps_price_history(engine: Engine) -> None:
-    with engine.begin() as connection:
+def test_batch_rebuild_of_products_keeps_price_history(sqlite_engine: Engine) -> None:
+    with sqlite_engine.begin() as connection:
         insert_price_history(connection)
 
-    with database.migration_connection(engine) as connection:
+    with database.migration_connection(sqlite_engine) as connection:
         operations = Operations(MigrationContext.configure(connection))
         with operations.batch_alter_table("products", recreate="always") as batch:
             batch.add_column(Column("nickname", String(20), nullable=True))
 
-    assert "nickname" in {column["name"] for column in inspect(engine).get_columns("products")}
-    assert count_snapshots(engine) == 1
-    with engine.connect() as connection:
+    assert "nickname" in {
+        column["name"] for column in inspect(sqlite_engine).get_columns("products")
+    }
+    assert count_snapshots(sqlite_engine) == 1
+    with sqlite_engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
 
 
@@ -229,11 +231,11 @@ def test_offline_sql_generation_is_rejected() -> None:
 
 
 def test_alembic_command_line_rebuilds_products_without_losing_price_history(
-    engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    sqlite_engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with engine.begin() as connection:
+    with sqlite_engine.begin() as connection:
         insert_price_history(connection)
-    monkeypatch.setenv("SCRAPER_DATABASE_URL", engine.url.render_as_string())
+    monkeypatch.setenv("SCRAPER_DATABASE_URL", sqlite_engine.url.render_as_string())
     config = Config(ALEMBIC_INI)
     config.set_main_option(
         "script_location", str(migrations_with_revision(tmp_path, REBUILD_PRODUCTS_REVISION))
@@ -241,28 +243,30 @@ def test_alembic_command_line_rebuilds_products_without_losing_price_history(
 
     command.upgrade(config, "head")
 
-    assert current_revision(engine) == "test"
-    assert "nickname" in {column["name"] for column in inspect(engine).get_columns("products")}
-    assert count_snapshots(engine) == 1
+    assert current_revision(sqlite_engine) == "test"
+    assert "nickname" in {
+        column["name"] for column in inspect(sqlite_engine).get_columns("products")
+    }
+    assert count_snapshots(sqlite_engine) == 1
 
 
 def test_failed_migration_rolls_back_every_statement(
-    engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    sqlite_engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with engine.begin() as connection:
+    with sqlite_engine.begin() as connection:
         insert_price_history(connection)
     location = migrations_with_revision(tmp_path, FAILING_REVISION)
     monkeypatch.setattr(database, "MIGRATIONS_LOCATION", str(location))
 
     with pytest.raises(SchemaMigrationError, match="boom in the test revision"):
-        upgrade_schema(engine)
+        upgrade_schema(sqlite_engine)
 
-    tables = set(inspect(engine).get_table_names())
+    tables = set(inspect(sqlite_engine).get_table_names())
     assert "leftover" not in tables
     assert "_alembic_tmp_products" not in tables
-    assert current_revision(engine) == head_revision()
-    assert count_snapshots(engine) == 1
-    with engine.connect() as connection:
+    assert current_revision(sqlite_engine) == head_revision()
+    assert count_snapshots(sqlite_engine) == 1
+    with sqlite_engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
 
 
