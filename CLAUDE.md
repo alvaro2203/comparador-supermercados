@@ -34,6 +34,17 @@ uv run pytest --cov --cov-fail-under=90    # what CI runs
 
 CI (`.github/workflows/ci.yml`, Linux + Windows) runs, in order: `ruff format --check`,
 `ruff check`, `mypy`, `pytest --cov --cov-fail-under=90`. Run all four before finishing a change.
+A second CI job, `postgres` (Linux), runs `pytest tests/integration` against a throwaway PostgreSQL
+through `SCRAPER_TEST_DATABASE_URL`. To do the same locally (needs Docker; the host must be local):
+
+```powershell
+docker run -d --rm --name scraper-pg-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=scraper -p 55432:5432 postgres:17-alpine
+uv sync --extra postgres
+$env:SCRAPER_TEST_DATABASE_URL = "postgresql+psycopg://postgres:test@localhost:55432/scraper"
+uv run pytest tests/integration --no-cov
+Remove-Item Env:SCRAPER_TEST_DATABASE_URL; docker stop scraper-pg-test
+```
+
 Pre-commit runs the same format, lint and type checks, and a `commit-msg` hook (`cz check`) that
 rejects messages that are not [Conventional Commits](https://www.conventionalcommits.org/).
 

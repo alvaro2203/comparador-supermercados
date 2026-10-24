@@ -12,6 +12,13 @@ paths:
 - No real clock: use `FixedClock` and `clock.advance(days=...)` for multi-day scenarios.
 - Databases are temporary SQLite files from the `engine` / `uow_factory` fixtures. Never point a
   test at `data/supermarkets.db`.
+- With `SCRAPER_TEST_DATABASE_URL` set, `engine` is that PostgreSQL database instead, dropped and
+  recreated (schema `public`) before every test. `local_test_database_url` in `conftest.py` refuses
+  any host but `localhost`, `127.0.0.1` and `::1`: never loosen it, and never point the variable at
+  Neon or any shared database. The CI `postgres` job runs `tests/integration` this way.
+- A test of behaviour only SQLite has (PRAGMAs, batch table rebuilds, the Alembic command line with a
+  SQLite URL) takes the `sqlite_engine` fixture, which is always SQLite. Everything else must pass on
+  both: use `engine`, and no SQLite-only functions or `PRAGMA` outside those tests.
 - Reuse `tests/conftest.py` fixtures (`fake_api`, `make_scraper`, `clock`, `engine`, `uow_factory`)
   instead of new mocks. Add shared helpers there, not copies in each file.
 - Mutate responses per test through `fake_api.responses[...]`; the fixture is a deep copy, so
