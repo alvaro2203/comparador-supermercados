@@ -30,6 +30,9 @@ paths:
   dozen or m (never per `100 g`).
 - Mercadona's new-arrival badge is the product-level `is_new_arrival`. `price_instructions.is_new`
   exists but is always `false` in real payloads; do not use it.
+- Mercadona's VAT is `price_instructions.tax_percentage` (`"10.000"`), present on every product.
+  `iva` is null on about three quarters of them and is only a fallback (`PriceInstructions.vat_rate`).
+  VAT stays optional: a product without either is stored with `vat_rate` NULL, not rejected.
 - The base class isolates pages and products by catching `DomainError` only. Expected data
   problems must raise a `DomainError` subclass; anything else is a bug and should fail loudly.
 

@@ -19,6 +19,7 @@
           "unavailable_from": "2026-10-20",
           "price_instructions": {
             "iva": 10,
+            "tax_percentage": "10.000",
             "is_new": false,
             "is_pack": false,
             "unit_size": 0.05,
@@ -41,6 +42,8 @@
           "display_name": "Aceite de oliva virgen extra Hacendado",
           "price_instructions": {
             "unit_price": "8.95",
+            "iva": null,
+            "tax_percentage": "4.000",
             "price_decreased": true,
             "previous_unit_price": "9.45",
             "reference_price": "8.950",

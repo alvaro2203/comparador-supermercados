@@ -73,6 +73,7 @@ class PriceInstructions(MercadonaModel):
     previous_unit_price: LooseDecimal = None
     price_decreased: bool = False
     iva: LooseDecimal = None
+    tax_percentage: LooseDecimal = None
     is_new: bool = False
     is_pack: bool = False
     pack_size: LooseDecimal = None
@@ -83,6 +84,15 @@ class PriceInstructions(MercadonaModel):
     approx_size: bool = False
     selling_method: int | None = None
     bunch_selector: bool = False
+
+    @property
+    def vat_rate(self) -> Decimal | None:
+        """Return the VAT percentage: ``tax_percentage``, or ``iva`` when it is missing.
+
+        Mercadona fills ``tax_percentage`` on every product and ``iva`` on about a
+        quarter of them; when both are present they agree.
+        """
+        return self.tax_percentage if self.tax_percentage is not None else self.iva
 
 
 class ListedProduct(MercadonaModel):

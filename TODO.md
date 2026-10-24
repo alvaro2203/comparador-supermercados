@@ -47,16 +47,34 @@ No hay tareas P0 abiertas.
 
 ## P2 · Calidad de los datos
 
-- [ ] **El IVA está vacío en el 73 % de los precios.**
+- [ ] **El IVA está vacío en el 73 % de los precios.** Arreglado en el código (rama `fix/fill-iva`);
+  falta el relleno del histórico en Neon.
   - **Situación:** el 23 de octubre, 3.120 de 4.275 precios tienen `vat_rate` NULL. El scraper lee
     `price_instructions.iva`, que Mercadona solo rellena en 1.155 productos. El campo
     `tax_percentage` («10.000», «21.000», «4.000») viene en todos, y coincide con `iva` siempre que
     los dos existen.
-  - **Hacer:** leer `tax_percentage` (y `iva` solo como respaldo), con test y fixture con `iva`
-    null. Mismo fallo que el de `is_new` frente a `is_new_arrival`.
-  - **Histórico:** los precios antiguos se quedan con NULL, salvo que se decida rellenarlos con el
-    IVA actual del producto (el IVA de los alimentos ha cambiado varias veces desde 2023, así que
-    sería una suposición).
+  - **Hecho:** el scraper lee `tax_percentage`, con `iva` de respaldo (`PriceInstructions.vat_rate`).
+    Es opcional: sin ninguno de los dos, el producto se guarda con IVA NULL. Fixtures con la forma
+    real (`iva` null en los aceites). Reprocesando el volcado del 23 de octubre: 0 de 4.274 precios
+    sin IVA (antes 3.119).
+  - **Pendiente, después de la primera ejecución con el arreglo (día `D`):** rellenar una vez los
+    días anteriores en Neon con el IVA que el mismo producto tiene el día `D`. Solo filas NULL. Antes,
+    crear una rama de copia en Neon. Vista previa y relleno, en el SQL Editor:
+    ```sql
+    SELECT s.captured_on, count(*)
+    FROM price_snapshots s
+    JOIN price_snapshots ref
+      ON ref.product_id = s.product_id AND ref.captured_on = DATE 'D' AND ref.vat_rate IS NOT NULL
+    WHERE s.vat_rate IS NULL AND s.captured_on < DATE 'D'
+    GROUP BY 1 ORDER BY 1;
+
+    UPDATE price_snapshots s
+    SET vat_rate = ref.vat_rate
+    FROM price_snapshots ref
+    WHERE ref.product_id = s.product_id AND ref.captured_on = DATE 'D' AND ref.vat_rate IS NOT NULL
+      AND s.vat_rate IS NULL AND s.captured_on < DATE 'D';
+    ```
+    Los productos retirados antes de `D` no tienen referencia y siguen en NULL.
 - [ ] **Recalcular los precios de referencia antiguos que se pueden comprobar.**
   - **Situación:** del 18 al 21 de octubre quedan 1.580 precios con `reference_unit = 'unknown'`
     (formatos «por 100 g» y «por 100 ml», antes del arreglo). En 1.424 de ellos, el valor guardado

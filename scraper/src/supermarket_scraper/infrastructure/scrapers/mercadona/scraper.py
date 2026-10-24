@@ -220,7 +220,7 @@ class MercadonaScraper(
             reference_unit=reference_unit,
             previous_amount=pricing.previous_unit_price if is_promotion else None,
             bulk_amount=pricing.bulk_price,
-            vat_rate=pricing.iva,
+            vat_rate=pricing.vat_rate,
             is_promotion=is_promotion,
         )
         return ProductListing(product=product, price=price)
