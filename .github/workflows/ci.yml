@@ -7,9 +7,6 @@ on:
       - "scraper/**"
       - ".github/workflows/ci.yml"
   pull_request:
-    paths:
-      - "scraper/**"
-      - ".github/workflows/ci.yml"
 
 defaults:
   run:
