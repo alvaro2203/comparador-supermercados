@@ -369,6 +369,15 @@ A full Mercadona run makes about 150 requests and takes 1–3 minutes, plus up t
 requests during the first days. Each run applies pending schema migrations first, so the runners
 below need no extra step after an update.
 
+### GitHub Actions (in progress)
+
+`.github/workflows/daily-scrape.yml` runs `run --save-raw` every day at 05:30 UTC against the
+PostgreSQL database in the repository secret `SCRAPER_DATABASE_URL` (Neon), and uploads the raw
+JSON as an artifact kept for 14 days. A manual run defaults to `--dry-run`. It has not run yet:
+follow [docs/ejecucion-diaria.md](../docs/ejecucion-diaria.md) step by step. The Windows,
+cron and systemd runners below stay available as alternatives; do not run two of them against
+different databases.
+
 ### Windows (Task Scheduler)
 
 ```powershell
