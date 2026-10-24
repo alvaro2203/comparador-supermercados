@@ -184,9 +184,11 @@ Desde el paso 1 el `cron` ya está activo. Nada más que hacer, salvo dos cosas:
 
 1. **No registres la tarea de Windows** (`scripts/register_windows_task.ps1`) mientras esto funcione,
    o tendrías dos ejecuciones al día en bases distintas.
-2. **`dry_run` ya viene desmarcado por defecto** (hecho el 24 de octubre): una ejecución manual
-   desde la pestaña Actions es real, salvo que marques la casilla. Las programadas siempre son
-   reales.
+2. **`dry_run` viene desmarcado por defecto**: una ejecución manual desde la pestaña Actions es real,
+   salvo que marques la casilla. Desde que existe el campo `target` (ver `docs/entorno-de-pruebas.md`,
+   parte B), el destino de un lanzamiento manual es `staging` por defecto; para escribir en producción
+   hay que elegir `production`, y solo se permite desde `main`. Las programadas siempre van a
+   producción.
 
 ## Día a día
 

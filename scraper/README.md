@@ -380,8 +380,9 @@ below need no extra step after an update.
 
 `.github/workflows/daily-scrape.yml` runs `run --save-raw` every day at 05:30 UTC against the
 PostgreSQL database in the repository secret `SCRAPER_DATABASE_URL` (Neon), and uploads the raw
-JSON as an artifact kept for 14 days. A manual run from the Actions tab is a real run unless its
-`dry_run` box is ticked. Mercadona accepting GitHub's IP addresses and a manual run writing to
+JSON as an artifact kept for 14 days. A manual run from the Actions tab asks for a `target`
+(`staging` by default, `production` only from `main`) and is a real run unless its `dry_run` box is
+ticked; the scheduled run always targets `production`. Mercadona accepting GitHub's IP addresses and a manual run writing to
 Neon were checked on 24 October 2026; the first run started by the schedule itself was not yet
 observed. Setup steps, the one-off history copy (`copy-db`) and troubleshooting are in
 [docs/ejecucion-diaria.md](../docs/ejecucion-diaria.md). The Windows, cron and systemd runners
