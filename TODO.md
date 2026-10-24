@@ -1,7 +1,8 @@
 # TODO
 
-Lista de tareas salida de la revisión de arquitectura de las migraciones (Alembic) y del análisis de
-las dos primeras ejecuciones reales contra Mercadona (18 y 20 de octubre de 2026).
+Lista revisada el 24 de octubre de 2026 tras auditar la base de datos (precios del 18 al 23 de
+octubre), el volcado JSON del 23 de octubre y el código. Las tareas ya hechas (migraciones, EAN,
+`report`, `dump`, versionado...) están en el historial de git y sus decisiones en el README.
 
 Prioridades:
 
@@ -10,225 +11,115 @@ Prioridades:
 - **P2** mejora la calidad de los datos.
 - **P3** funcionalidad nueva.
 
+Estado de los datos el 23 de octubre: 4.274 productos activos, todos con ficha y `gtin`; 622
+categorías; 4 días con precios (18, 20, 21 y 23); 0 errores en las 7 ejecuciones; etiquetas
+(`Product.label`) únicas en todo el catálogo activo; 1 precio sin unidad de referencia (explicado
+en P2).
+
 ---
 
-## P0 · Arreglar las migraciones (revisión de arquitectura)
+## P0
 
-La base de datos actual no corre peligro mientras solo exista la migración `0001`. Todo esto tiene que
-estar resuelto **antes de crear la `0002`**.
+No hay tareas P0 abiertas.
 
-- [x] **`alembic upgrade` desde la terminal puede borrar el histórico de precios.**
-  - **Problema:** la rama de `migrations/env.py` que se usa cuando no se le pasa conexión migra con las
-    foreign keys activadas. En SQLite, una migración en modo batch sobre `products` hace `DROP TABLE`, y
-    el `ON DELETE CASCADE` vacía `price_snapshots`. El revisor lo reprodujo: quedaron 0 precios. Sin
-    `SCRAPER_DATABASE_URL`, esa rama apunta a `data/supermarkets.db`.
-  - **Arreglo:** que `env.py` use el mismo `_migration_connection` que `upgrade_schema()`. Añadir un
-    test que pase por esa rama con una migración que reconstruya `products` y compruebe que los precios
-    siguen ahí.
-- [x] **Las migraciones no son atómicas en SQLite.**
-  - **Problema:** el driver `pysqlite` no abre la transacción antes de un `CREATE` o un `DROP`. Una
-    migración que falla a medias deja tablas creadas, y todas las ejecuciones siguientes fallan con
-    "table already exists".
-  - **Arreglo:** en la conexión de migración, poner `isolation_level = None` y emitir `BEGIN` a mano.
-    Añadir un test que compruebe que una migración fallida no deja tablas nuevas.
-- [x] **Un fallo de migración sale con código 1 ("partial") y con traceback.**
-  - **Problema:** systemd trata el código 1 como éxito (`SuccessExitStatus=1`), así que el fallo
-    pasaría desapercibido a diario.
-  - **Arreglo:** que el CLI capture `SQLAlchemyError` y `alembic.util.CommandError` alrededor de
-    `upgrade_schema`, muestre el error en una línea y devuelva `ExitCode.FAILED` (2). Añadir un test en
-    `test_cli.py`.
-- [x] **La adopción de una base de datos antigua solo comprueba la tabla `supermarkets`.**
-  - **Problema:** una base de datos creada a medias quedaría marcada como `0001` aunque le falten
-    tablas.
-  - **Arreglo:** marcarla solo si existen las seis tablas de la versión inicial. Si no, dar un error
-    claro.
-- [x] **`env.py` ignora en silencio un valor de `connection` que no sea un `Connection`.**
-  - **Problema:** en ese caso migraría la base de datos por defecto.
-  - **Arreglo:** lanzar `TypeError` cuando la clave existe pero el valor no es un `Connection`.
-- [x] **No se valida la integridad al terminar.**
-  - **Problema:** las migraciones corren con las foreign keys desactivadas, y al volver a activarlas
-    nadie comprueba los datos.
-  - **Arreglo:** ejecutar `PRAGMA foreign_key_check` antes de confirmar la transacción, y abortar si
-    devuelve alguna fila.
-- [x] **Docstring engañoso en `script.py.mako`.**
-  - **Problema:** el `downgrade` promete "sin borrar datos", pero autogenerate lo rellena con
-    `drop_column`.
-  - **Arreglo:** dejar un docstring neutro.
-- [x] **Corregir la documentación.**
-  - En `persistence.md` y el README, limitar la frase sobre las foreign keys a lo que es cierto hoy, o
-    reescribirla cuando esté hecho el primer punto.
-  - Avisar de que `alembic upgrade head` no adopta bases de datos antiguas: hay que lanzar
-    `supermarket-scraper init-db` primero.
-  - Mencionar `env.py` como segundo punto de entrada en "Architecture", en el README y en CLAUDE.md.
-
-## P1 · Histórico continuo y EAN completos
+## P1 · Histórico continuo
 
 - [ ] **Programar la ejecución diaria.**
-  - **Problema:** el 19 de octubre no tiene datos, y las ejecuciones se lanzaron a mano a horas
-    distintas (01:33 y 20:27, hora de Madrid). El 18 de octubre fue la primera carga.
-  - **Hacer:** registrar la tarea con `scripts/register_windows_task.ps1` para que corra a las 06:30,
-    después de que Mercadona actualice los precios.
-  - **Aplazado:** se hará con GitHub Actions cuando el scraper esté pulido.
-- [x] **Completar los EAN cuanto antes.**
-  - **Situación:** solo 1.000 de 4.296 productos (23 %) tienen EAN, marca y detalles, porque
-    `SCRAPER_DETAILS_LIMIT=500` limita la descarga por ejecución. A ese ritmo se tardan unas 9
-    ejecuciones, y mientras tanto no se puede cruzar casi nada entre cadenas.
-  - **Hacer:** un comando de relleno puntual, por ejemplo `enrich --all`, que descargue los ~3.300
-    restantes sin saltarse los límites de cortesía. Con 0,25 s entre peticiones son unos 15 minutos.
-    Otra opción es subir el límite solo durante unos días.
-  - **Hecho:** comando `uv run supermarket-scraper enrich [CODE ...] [--limit N]`. Confirma cada
-    100 productos (si se corta, la siguiente ejecución sigue donde lo dejó) y se para si falla un
-    lote entero. `run` usa el mismo código para sus 500 diarios.
-  - **Resultado (21 oct):** 3.282 de 3.283 en 14 minutos. 4.280 de 4.281 productos activos (99,98 %)
-    tienen EAN y `gtin`; todos los EAN son válidos. El que falta es el producto `8300` («Pintalabios
-    Creamy Deliplus 219 marrón chocolate»): su ficha devuelve **404** aunque sigue en el catálogo.
-  - **Hecho:** cada fallo de detalle se escribe en el log (`Detail enrichment failure`, con
-    `scope` y `reason`) y `enrich` imprime los motivos (hasta 20). Antes no quedaba rastro de ellos.
-- [x] **Normalizar los EAN.**
-  - **Situación:** 996 EAN tienen 13 dígitos. Nutella y Heineken traen 8 dígitos, que es un EAN-8
-    válido. El gnocchi Hacendado (12 dígitos) y el tequila Olmeca (11) parecen haber perdido ceros por
-    la izquierda.
-  - **Hacer:** guardar una forma normalizada (GTIN-14, rellenando con ceros por la izquierda) en una
-    columna nueva, con su migración, y conservar el valor original. Validar el dígito de control y
-    marcar los códigos que no lo cumplan.
-  - **Hecho:** columna `products.gtin` (migración `0002`, con relleno de los EAN existentes) y
-    `normalize_gtin` en el dominio. `gtin` es NULL si el EAN falla el dígito de control, así que
-    `ean IS NOT NULL AND gtin IS NULL` lista los inválidos. Comprobado sobre una copia de la base de
-    datos: los 1.000 EAN actuales son válidos, también los de 8, 11 y 12 dígitos (no estaban
-    corruptos: eran EAN-8 y UPC sin el cero inicial).
-- [x] **Elegir la región de precios.**
-  - **Situación:** los precios de Mercadona dependen del almacén (`MERCADONA_WAREHOUSE`, por defecto
-    `mad1`).
-  - **Hacer:** decidir qué región o regiones interesan antes de acumular meses de histórico. Si son
-    varias, el almacén tiene que formar parte de la clave del precio, con cambio de esquema incluido.
-  - **Decidido:** solo Madrid (`mad1`). Sin cambio de esquema. Documentado en README, CLAUDE.md y
-    `.env.example`, con el aviso de que cambiar el almacén en una base de datos existente mezcla
-    regiones en el histórico.
+  - **Situación:** faltan el 19 y el 22 de octubre. Cada día sin ejecutar es un hueco que no se
+    puede recuperar.
+  - **Plan:** GitHub Actions cuando el scraper esté pulido. Antes hay que resolver:
+    - **Dónde vive la base de datos.** Cada ejecución de Actions empieza en una máquina vacía, y
+      `data/supermarkets.db` no está en git. Opciones: una base de datos PostgreSQL externa
+      (basta con cambiar `SCRAPER_DATABASE_URL`), subir y bajar el `.db` como artefacto o en una
+      release, o un runner propio (tu PC). La caché de Actions no sirve: se borra a los 7 días sin
+      uso.
+    - **Si Mercadona responde a las IP de GitHub.** Los runners están en centros de datos de
+      Azure, casi siempre fuera de España. Probarlo con un workflow manual que solo haga
+      `run --dry-run` antes de confiar en él.
+    - **Horario.** El `cron` de Actions va en UTC y puede retrasarse; en repos públicos sin
+      actividad se desactiva a los 60 días. El día de los precios no se ve afectado, porque lo
+      decide `SCRAPER_TIMEZONE`.
+    - **El repositorio aún no tiene remoto.** Hay que publicarlo en GitHub primero, y así también
+      empieza a correr el CI.
+  - **Alternativa inmediata:** `scripts/register_windows_task.ps1` en tu PC, hasta tener Actions.
+- [ ] **Copia de seguridad de la base de datos antes de cada ejecución** (antes en P3).
+  - **Por qué sube de prioridad:** el histórico no se puede volver a descargar, y todo está en un
+    único fichero. Además, todas las tablas cuelgan de `supermarkets` con `ON DELETE CASCADE`: un
+    `DELETE` a mano de esa fila borraría todo el histórico de la cadena.
+  - **Hacer:** copia rotada (como los logs) en el runner diario, con la API de copia de SQLite
+    (`sqlite3 .backup` o `VACUUM INTO`), no copiando el fichero mientras se escribe. Si se elige
+    PostgreSQL externo, sus copias sustituyen a esta tarea.
+- [ ] **Guardar el JSON en bruto en la ejecución diaria.**
+  - **Por qué:** con el JSON guardado, el fallo de los precios «por 100 g» se habría corregido
+    reprocesando los días afectados con `run --from-raw`. Sin él, esos días solo se pueden arreglar
+    a medias (ver P2).
+  - **Hacer:** que `scripts/run_daily.ps1`, `run_daily.sh` y el futuro workflow usen
+    `run --save-raw`. Ocupa unos 5,5 MB al día (unos 2 GB al año), así que va junto con la tarea de
+    comprimir y rotar de P3.
 
 ## P2 · Calidad de los datos
 
-- [x] **EAN compartidos por varios productos de una misma cadena.**
-  - **Situación:** 13 EAN aparecen en 2 productos cada uno (26 en total). Son panes de la panadería:
-    la pieza entera y su versión rebanada, con ids como `9638.1` y `9638.2`. El EAN no identifica un
-    producto único dentro de Mercadona.
-  - **Hacer:** comprobar si pasa solo con el pan o también en otras categorías. Decidir cómo trata el
-    comparador un `gtin` con varios productos (devolver todos, o elegir por nombre y formato) y
-    dejarlo documentado antes de cruzar con la segunda cadena.
-  - **Comprobado (23 oct):** solo pasa en la panadería. Son 13 pares `X.1`/`X.2` (entero y
-    rebanado) con el mismo EAN, el mismo tamaño y siempre el mismo precio.
-  - **Decidido:** el comparador devuelve todos los productos de un `gtin` como variantes. Documentado
-    en README, CLAUDE.md y las reglas; un test fija que `gtin` no es único.
-- [x] **Productos activos cuya ficha devuelve 404.**
-  - **Situación:** el `8300` está en el catálogo pero su ficha no existe. Cada `run` lo vuelve a
-    pedir entre sus 500 diarios, y `enrich` también.
-  - **Hacer:** decidir qué hacer con los productos sin ficha (marcarlos, o dejar de reintentarlos
-    durante unos días). Mientras haya pocos, no es urgente.
-  - **Decidido: no hacer nada.** El 8300 dio 404 el 21 de octubre y ese mismo día Mercadona lo
-    retiró del catálogo: el 404 era el aviso previo a la retirada. El 23 de octubre no queda ningún
-    producto activo sin ficha. Reabrir si los fallos de `Detail enrichment failure` se acumulan.
-- [x] **Productos sustituidos por otro identificador.**
-  - **Situación:** la «Papilla 8 cereales con galleta María Nestlé» se retiró con el id `35602` y
-    reapareció con el id `18497` y otra imagen. El histórico de precios queda partido en dos productos.
-  - **Hacer:** detectar sucesores (mismo EAN o, si falta, el mismo nombre y formato el mismo día) y
-    enlazarlos, por ejemplo con `replaced_by_product_id`.
-  - **Comprobado (23 oct):** la papilla no es el mismo artículo: pasó de 725 g a 480 g y cambió de
-    EAN. Los otros 4 candidatos por nombre (napolitana 130 → 147 g, refresco, pañales) también
-    cambian de tamaño y de EAN. Según GS1, otro tamaño es otro producto.
-  - **Hecho:** columna `products.replaced_by_product_id` (migración `0003`) que cada `run` rellena
-    solo cuando un producto retirado y uno nuevo comparten `gtin` (un único candidato, visto por
-    primera vez después de la última vez que se vio el retirado). Por nombre no se enlaza. Con los
-    datos actuales da 0 enlaces. Los cambios de tamaño se comparan por precio de referencia (otra
-    tarea de P2).
-- [x] **`is_new_arrival` nunca está activo con datos reales.**
-  - **Situación:** el 20 de octubre aparecieron 9 productos nuevos y ninguno trae `is_new = true`. La
-    fixture de los tests sí trae uno.
-  - **Hacer:** investigar con el agente `supermarket-api-researcher` si Mercadona ha dejado de enviar
-    el campo o lo envía en otro sitio. Mientras tanto, calcular las «novedades» a partir de
-    `first_seen_at`.
-  - **Causa (23 oct):** fallo del scraper. Mercadona sí marca las novedades, pero en el campo
-    `is_new_arrival` del producto; el scraper leía `price_instructions.is_new`, que siempre viene a
-    `false`. Comprobado con 4 páginas reales (26 novedades). No hizo falta el agente.
-  - **Hecho:** el scraper lee `is_new_arrival`, obligatorio en el esquema (si desaparece, sale como
-    `SourceSchemaError`, no como un `false` silencioso). Fixtures corregidas a la forma real.
-    `is_new_arrival` es el distintivo de Mercadona (dura semanas); `first_seen_at` es cuándo lo vimos
-    por primera vez. Los productos actuales se marcarán en el próximo `run`.
-- [x] **Nombres repetidos.**
-  - **Situación:** varios aceites Hacendado comparten nombre (hasta 3 productos con «Aceite de oliva
-    virgen extra Hacendado»). Seguramente son tamaños distintos, pero no está comprobado.
-  - **Hacer:** confirmarlo, y que cualquier listado muestre siempre el nombre junto con el formato
-    (`packaging`, `unit_size`).
-  - **Confirmado (23 oct):** 262 nombres repetidos en 631 productos activos; ninguno con la misma
-    presentación.
-  - **Hecho:** `Product.label` («Aceite de oliva virgen extra Hacendado (Garrafa 5 l)», «(Pack-6 6 x
-    1,5 l)», «(Paquete 26 ud)»). Con el catálogo real da 4.275 etiquetas distintas para 4.275
-    productos activos. Documentado como la forma obligatoria de mostrar un producto.
-- [x] **Distinguir los cambios de precio reales de las promociones.**
-  - **Situación:** hubo 80 cambios en dos días (53 subidas y 27 bajadas, +2,4 % de media). El contador
-    `price_changes` no separa una subida de tarifa de la entrada o salida de una promoción.
-  - **Hacer:** clasificar cada cambio (tarifa, inicio de promoción, fin de promoción) y guardarlo en
-    `scrape_runs` o calcularlo al consultar.
-  - **Hecho:** `Price.change_from` clasifica en subida, bajada, inicio y fin de promoción. Cada `run`
-    guarda el desglose en `scrape_runs` (migración `0004`) y lo muestran el informe y `history`
-    (columnas `up`, `down`, `promo+`, `promo-`; `-` en ejecuciones anteriores).
-  - **Resultado con los datos guardados:** del 18 al 20 de octubre, los 80 cambios fueron 35 subidas,
-    16 bajadas, 11 promociones que empiezan y 18 que acaban. De las «53 subidas» que conté al
-    principio, 18 eran solo el fin de una promoción.
-- [x] **Comparar por precio de referencia.**
-  - **Situación:** el aguacate (−29 %) y el calabacín (−28 %) son producto fresco y oscilan mucho.
-  - **Hacer:** que las comparaciones y alertas usen `reference_amount` (€/kg, €/l) en lugar del precio
-    del envase.
-  - **Fallo encontrado (23 oct):** unos 530 precios al día (12 %) tenían `reference_unit = unknown`.
-    Mercadona da la referencia «por 100 g» o «por 100 ml» en envases pequeños, y el parser no lo
-    entendía: el orégano quedaba con 4,00 «por algo» en lugar de 40,00 €/kg.
-  - **Hecho:** `MeasureUnit.parse_quantity` («100 g» → 0,1 kg, «75 cl», «12 ud»...) y el scraper
-    divide por esa cantidad, así que `reference_amount` es siempre por kg, l, unidad, docena o metro.
-    Verificado con 214 productos reales: ninguno `unknown` y coincide con el `bulk_price` de
-    Mercadona. Documentado que comparaciones y alertas usan `reference_amount`; aún no existen, se
-    aplicará en `report`, la API y las alertas.
-  - **No hecho a propósito:** no he reescrito los ~2.100 precios antiguos afectados (18-23 oct). Para
-    unos 200 no se puede saber el formato original; quedan como `unknown` (no comparables) en vez de
-    con un valor adivinado.
-- [x] **La etiqueta dice «ud» cuando las unidades tienen nombre.**
-  - **Situación:** el detergente de Marsella sale como «Botella 3 l, 50 ud» cuando son 50 lavados, y
-    el lavavajillas en pastillas como «…, 30 ud» cuando son 30 pastillas. Mercadona envía el nombre
-    en `price_instructions.unit_name` («lavados», «pastillas»), pero el scraper no lo guarda.
-  - **Hacer:** añadir `unit_name` a `PackagingInfo` y a `products` (columna nueva, que admita NULL,
-    con su migración), mapearlo en el scraper de Mercadona y usarlo en `PackagingInfo.describe()`
-    en lugar de «ud» cuando exista. Comprobar después que las etiquetas siguen siendo únicas en el
-    catálogo activo.
-  - **Hecho:** `PackagingInfo.unit_name` y columna `products.unit_name` (migración `0005`). El
-    scraper guarda «lavados», «pastillas», «cápsulas», «sobres», «recambios»… y deja a NULL el
-    genérico «ud.». Las etiquetas quedan como «Botella 3 l, 50 lavados» o «Caja 40 pastillas».
-    Comprobado con 283 productos reales de 7 páginas: 283 etiquetas distintas. La comprobación
-    sobre el catálogo entero queda para después del próximo `run`, que es el que rellena la columna.
+- [ ] **El IVA está vacío en el 73 % de los precios.**
+  - **Situación:** el 23 de octubre, 3.120 de 4.275 precios tienen `vat_rate` NULL. El scraper lee
+    `price_instructions.iva`, que Mercadona solo rellena en 1.155 productos. El campo
+    `tax_percentage` («10.000», «21.000», «4.000») viene en todos, y coincide con `iva` siempre que
+    los dos existen.
+  - **Hacer:** leer `tax_percentage` (y `iva` solo como respaldo), con test y fixture con `iva`
+    null. Mismo fallo que el de `is_new` frente a `is_new_arrival`.
+  - **Histórico:** los precios antiguos se quedan con NULL, salvo que se decida rellenarlos con el
+    IVA actual del producto (el IVA de los alimentos ha cambiado varias veces desde 2023, así que
+    sería una suposición).
+- [ ] **Recalcular los precios de referencia antiguos que se pueden comprobar.**
+  - **Situación:** del 18 al 21 de octubre quedan 1.580 precios con `reference_unit = 'unknown'`
+    (formatos «por 100 g» y «por 100 ml», antes del arreglo). En 1.424 de ellos, el valor guardado
+    por 10 coincide exactamente con el `bulk_amount` (€/kg o €/l) que se guardó en la misma fila,
+    así que el valor correcto es seguro, no adivinado.
+  - **Hacer:** una migración de datos (o un comando puntual) que corrija solo esas filas, con
+    `reference_unit` en kg o l, y deje como `unknown` las ~160 restantes (sobre todo conservas con
+    peso escurrido). Reescribe histórico: **necesita tu visto bueno**, y antes una copia de la base
+    de datos.
+- [ ] **`is_available` marca como no disponible un producto que todavía se vende.**
+  - **Situación:** el scraper pone `is_available = false` si viene `unavailable_from`, pero esa
+    fecha es futura (3 productos, entre el 24 y el 27 de octubre): el producto deja de venderse a
+    partir de ese día. Además, `unavailable_weekdays` (7 productos que no se venden algunos días
+    de la semana) no se guarda.
+  - **Hacer:** decidir si `is_available` compara `unavailable_from` con el momento de la captura,
+    y si merece la pena guardar las dos cosas. Poco urgente: afecta a 10 productos.
+- [ ] **Varias ejecuciones el mismo día.**
+  - **Situación:** el 23 de octubre hubo 4 ejecuciones. Cada una vuelve a contar los mismos 45
+    cambios contra el día anterior, así que sumar `price_changes` en `history` cuenta de más. Y un
+    producto que desaparece en una ejecución posterior conserva el precio de la anterior: es el
+    caso de la crema K-Skin (`18627`), retirada a las 21:00, que además es el único precio
+    `unknown` del día (lo guardó la ejecución de las 15:51, anterior al arreglo).
+  - **Hacer:** documentarlo en el README («los contadores de una ejecución se refieren al día, no
+    a la ejecución»), o que `report` solo cuente los productos activos al final del día. Con la
+    ejecución diaria programada casi no pasará.
 
 ## P3 · Funcionalidad nueva
 
-- [x] **Comando `report`.** Un resumen de la última ejecución frente a la anterior: cambios de precio
-  con los mayores porcentajes, altas, bajas, promociones y cobertura de EAN. Es el análisis que hoy se
-  hace a mano con SQL.
-  - **Hecho:** `report [CODE ...] [--day AAAA-MM-DD] [--top N]`, sin red. Compara un día de precios
-    guardados (por defecto el último) con el día anterior que tenga datos, no ejecuciones: varias
-    ejecuciones el mismo día cuentan como un día. Muestra los cambios por tipo con las mayores
-    subidas, bajadas y promociones nuevas, los productos nuevos y retirados, las promociones activas,
-    las novedades, la cobertura de GTIN y los precios sin unidad de referencia. Usa `Product.label`.
-- [x] **Comando `dump`.** Guardar los JSON en bruto de cada ejecución en `data/raw/<fecha>/`, para
-  poder reprocesarlos sin volver a llamar a la API y para depurar cambios de la API.
-  - **Hecho:** `dump` descarga y valida sin tocar la base de datos; `run --save-raw` guarda lo que
-    descarga un run normal (también las fichas), y `run --from-raw <carpeta>` lo procesa sin red con
-    la fecha del volcado. Se guarda en `data/raw/<cadena>/<fecha>/` byte a byte, con `manifest.json`.
-    Unos 6-10 MB al día sin comprimir.
-  - **Verificado contra la API real (2026-10-23):** `dump` guardó las 152 páginas de categorías y
-    `run --from-raw ... --dry-run` las procesó sin red: 622 categorías, 4274 productos, 0 errores.
-    Si el tamaño molesta, se puede comprimir con gzip más adelante.
-  - **Pendiente menor:** al reprocesar, el reloj congelado hace que la ejecución dure "0.0s" y que
-    `history` la muestre con la hora de la captura. Se podría medir la duración con el reloj real
-    y usar el congelado solo para el día de los precios.
-- [ ] **Copia de seguridad diaria** de `supermarkets.db` antes de cada ejecución, rotando las copias
-  como los logs. El histórico no se puede volver a descargar.
 - [ ] **Segunda cadena** (Carrefour, DIA…), con el skill `add-supermarket`. Es la prueba real de que el
   modelo y el emparejamiento por EAN funcionan.
-- [ ] **Comparar marcas blancas.** Hacendado, Deliplus o Bosque Verde no tienen equivalente por EAN en
-  otras cadenas. Habrá que emparejar por categoría, tipo de producto y precio de referencia.
+- [ ] **Comparar marcas blancas.** Hacendado (1.796), Deliplus (561) y Bosque Verde (306) son el
+  62 % del catálogo activo de Mercadona y no tienen equivalente por EAN en otras cadenas. Otros 514
+  productos no tienen marca: son producto fresco (carne, fruta y verdura, panadería, pescado). El
+  cruce por EAN cubrirá como mucho 1.097 productos (una cuarta parte del catálogo); el resto hay que
+  emparejarlo por categoría, tipo de producto y precio de referencia. Hay otras marcas propias más
+  pequeñas (Colorcor, Compy, Delikuit…) que reducen aún más esa cifra.
 - [ ] **API REST de solo lectura**, después de la segunda cadena: búsqueda, histórico de un producto y
   comparación por EAN.
+- [ ] **Comprimir y rotar el archivo JSON en bruto.** A 5,5 MB al día, guardarlo a diario son unos
+  2 GB al año. Guardar con gzip (medido: 5,3 MB → 0,46 MB, 11 veces menos, unos 170 MB al año) y borrar los volcados de más de
+  N días (`SCRAPER_RAW_RETENTION_DAYS`).
+- [ ] **Duración real al reprocesar con `--from-raw`.** El reloj congelado hace que la ejecución dure
+  «0.0s» y que `history` la muestre con la hora de la captura. Medir la duración con el reloj real
+  y usar el congelado solo para el día de los precios.
+- [ ] **Guardar los distintivos de Mercadona** (`badges`): `requires_age_check` (211 productos:
+  alcohol y similares) y `is_water` (38). Útiles como filtros en el comparador; hoy se descartan.
+
+## Herramientas
+
+- [ ] **Primera versión:** `uv run cz bump --yes` desde `scraper/` → `v0.2.0` y `CHANGELOG.md`.
+- [ ] **CI, cuando el repositorio esté en GitHub:**
+  - Comprobar los mensajes de commit de cada PR (`cz check --rev-range origin/main..HEAD`).
+  - Cambiar `uv sync --frozen` por `uv sync --locked`: `--frozen` no detecta un `uv.lock`
+    desactualizado respecto a `pyproject.toml`.
