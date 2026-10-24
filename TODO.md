@@ -24,38 +24,26 @@ No hay tareas P0 abiertas.
 
 ## P1 · Histórico continuo
 
-- [ ] **Programar la ejecución diaria.**
-  - **Situación:** faltan el 19 y el 22 de octubre. Cada día sin ejecutar es un hueco que no se
-    puede recuperar.
-  - **Plan:** GitHub Actions cuando el scraper esté pulido. Antes hay que resolver:
-    - **Dónde vive la base de datos.** Cada ejecución de Actions empieza en una máquina vacía, y
-      `data/supermarkets.db` no está en git. Opciones: una base de datos PostgreSQL externa
-      (basta con cambiar `SCRAPER_DATABASE_URL`), subir y bajar el `.db` como artefacto o en una
-      release, o un runner propio (tu PC). La caché de Actions no sirve: se borra a los 7 días sin
-      uso.
-    - **Si Mercadona responde a las IP de GitHub.** Los runners están en centros de datos de
-      Azure, casi siempre fuera de España. Probarlo con un workflow manual que solo haga
-      `run --dry-run` antes de confiar en él.
-    - **Horario.** El `cron` de Actions va en UTC y puede retrasarse; en repos públicos sin
-      actividad se desactiva a los 60 días. El día de los precios no se ve afectado, porque lo
-      decide `SCRAPER_TIMEZONE`.
-    - **El repositorio aún no tiene remoto.** Hay que publicarlo en GitHub primero, y así también
-      empieza a correr el CI.
-  - **Alternativa inmediata:** `scripts/register_windows_task.ps1` en tu PC, hasta tener Actions.
-- [ ] **Copia de seguridad de la base de datos antes de cada ejecución** (antes en P3).
-  - **Por qué sube de prioridad:** el histórico no se puede volver a descargar, y todo está en un
-    único fichero. Además, todas las tablas cuelgan de `supermarkets` con `ON DELETE CASCADE`: un
-    `DELETE` a mano de esa fila borraría todo el histórico de la cadena.
-  - **Hacer:** copia rotada (como los logs) en el runner diario, con la API de copia de SQLite
-    (`sqlite3 .backup` o `VACUUM INTO`), no copiando el fichero mientras se escribe. Si se elige
-    PostgreSQL externo, sus copias sustituyen a esta tarea.
-- [ ] **Guardar el JSON en bruto en la ejecución diaria.**
-  - **Por qué:** con el JSON guardado, el fallo de los precios «por 100 g» se habría corregido
-    reprocesando los días afectados con `run --from-raw`. Sin él, esos días solo se pueden arreglar
-    a medias (ver P2).
-  - **Hacer:** que `scripts/run_daily.ps1`, `run_daily.sh` y el futuro workflow usen
-    `run --save-raw`. Ocupa unos 5,5 MB al día (unos 2 GB al año), así que va junto con la tarea de
-    comprimir y rotar de P3.
+- [ ] **Programar la ejecución diaria.** Montada y probada a mano; falta ver la primera ejecución
+  programada.
+  - **Hecho (24 oct):** `.github/workflows/daily-scrape.yml` ejecuta `run --save-raw` cada día a las
+    05:30 UTC contra PostgreSQL en Neon (secreto `SCRAPER_DATABASE_URL`). Probado: Mercadona acepta
+    las IP de GitHub (`dry_run` completo) y una ejecución manual real escribió en Neon. El histórico
+    de 4 días se copió con `copy-db`. Guía: `docs/ejecucion-diaria.md`.
+  - **Pendiente:** comprobar que el `cron` lanza la ejecución del 25 de octubre sin ayuda y que
+    `report` compara el 25 con el 24. Cuando salga verde dos días seguidos, marcar como hecha.
+  - **Sigue abierto:** faltan el 19 y el 22 de octubre, y no se pueden recuperar.
+- [ ] **Copia de seguridad de la base de datos.**
+  - **Situación:** el histórico no se puede volver a descargar. Con Neon, la base ya no es un único
+    fichero en tu PC, pero sigue siendo una sola copia: un `DELETE` a mano sobre `supermarkets`
+    borraría en cascada todo el histórico de la cadena.
+  - **Hacer:** comprobar en el panel de Neon qué restauración ofrece el plan gratuito (ventana de
+    tiempo y cómo se usa) y probarla una vez en una rama, sin tocar la principal. Si no basta,
+    añadir un volcado periódico (`pg_dump`) como artefacto o en otro almacenamiento. Mientras tanto,
+    `scraper/data/supermarkets.db` es una copia local hasta el 23 de octubre: no la borres.
+- [x] **Guardar el JSON en bruto en la ejecución diaria.**
+  - **Hecho:** el workflow usa `run --save-raw` y sube los JSON como artefacto durante 14 días
+    (478 KB comprimidos). Para guardarlos más tiempo, ver la tarea de comprimir y rotar en P3.
 
 ## P2 · Calidad de los datos
 

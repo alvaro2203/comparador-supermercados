@@ -89,7 +89,7 @@ Los runners de GitHub están en centros de datos de Microsoft, normalmente fuera
 Mercadona podría bloquearlos o redirigirlos. Se prueba antes de depender de ello.
 
 1. **Actions → daily-scrape → Run workflow.**
-2. Deja marcada la casilla **dry_run** y pulsa el botón verde.
+2. Marca la casilla **dry_run** y pulsa el botón verde.
 3. Espera 2-4 minutos y abre la ejecución.
 
 `dry_run` valida todo el catálogo pero no escribe en la base de datos.
@@ -184,9 +184,9 @@ Desde el paso 1 el `cron` ya está activo. Nada más que hacer, salvo dos cosas:
 
 1. **No registres la tarea de Windows** (`scripts/register_windows_task.ps1`) mientras esto funcione,
    o tendrías dos ejecuciones al día en bases distintas.
-2. **Cambia el valor por defecto de `dry_run`** de `true` a `false` en `daily-scrape.yml` cuando
-   estés seguro. Hoy lo protege contra ejecuciones manuales accidentales; las programadas siempre
-   son reales.
+2. **`dry_run` ya viene desmarcado por defecto** (hecho el 24 de octubre): una ejecución manual
+   desde la pestaña Actions es real, salvo que marques la casilla. Las programadas siempre son
+   reales.
 
 ## Día a día
 
