@@ -195,6 +195,11 @@ is the total; the breakdown tells a temporary discount from a real price move.
 `is_new_arrival`, which marks products for a few weeks). `first_seen_at` is when this scraper first
 saw the product. They answer different questions; use the one that fits.
 
+**VAT.** `vat_rate` is the percentage (4, 10, 21) from Mercadona's `tax_percentage`, which every
+product carries; the older `iva` field is null on about three quarters of them and is only a
+fallback. Snapshots stored before that was fixed (from 18 October 2026 until the first run with the
+fix) lack VAT on ~73 % of rows unless they were backfilled; prices include VAT either way.
+
 **Product labels.** Many products share a name and differ only in presentation (262 names, 631
 Mercadona products). Any listing must show `Product.label`, the name plus
 `PackagingInfo.describe()`: "Aceite de oliva virgen extra Hacendado (Garrafa 5 l)",
@@ -475,7 +480,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 165 tests, ~95% branch coverage
+uv run pytest --cov         # 168 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
+import pytest
+
 from supermarket_scraper.domain.value_objects import MeasureUnit, SellingMethod
 from supermarket_scraper.infrastructure.scrapers.registry import default_registry, discover_scrapers
 
@@ -43,6 +45,7 @@ async def test_fetch_catalog_normalizes_tree_products_and_prices(
     assert pepper.reference_unit is MeasureUnit.KILOGRAM
     salt = listings["34008"]
     assert salt.price.previous_amount is None
+    assert salt.price.vat_rate == Decimal(10)
     assert salt.product.packaging.is_pack
     assert salt.product.packaging.total_units == 2
     assert not listings["15061"].product.is_available
@@ -129,6 +132,35 @@ async def test_product_without_its_new_arrival_flag_is_schema_drift(
     assert len(snapshot.failures) == 1
     assert "is_new_arrival" in snapshot.failures[0].reason
     assert "15061" not in {item.product.external_id for item in snapshot.listings}
+
+
+@pytest.mark.parametrize(
+    ("vat_fields", "expected"),
+    [
+        ({"iva": None, "tax_percentage": "21.000"}, Decimal(21)),
+        ({"iva": 10}, Decimal(10)),
+        ({}, None),
+    ],
+)
+async def test_vat_comes_from_tax_percentage_with_iva_as_fallback(
+    make_scraper: Callable[[], MercadonaScraper],
+    fake_api: FakeApi,
+    vat_fields: dict[str, object],
+    expected: Decimal | None,
+) -> None:
+    page = cast(
+        "dict[str, list[dict[str, list[dict[str, object]]]]]",
+        fake_api.responses["/api/categories/115/"],
+    )
+    pricing = cast("dict[str, object]", page["categories"][0]["products"][0]["price_instructions"])
+    del pricing["iva"], pricing["tax_percentage"]
+    pricing.update(vat_fields)
+    async with make_scraper() as scraper:
+        snapshot = await scraper.fetch_catalog()
+
+    listings = {item.product.external_id: item for item in snapshot.deduplicated_listings()}
+    assert snapshot.failures == ()
+    assert listings["15061"].price.vat_rate == expected
 
 
 async def test_named_units_are_kept_and_the_generic_one_is_dropped(
