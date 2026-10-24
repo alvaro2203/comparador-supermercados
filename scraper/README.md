@@ -330,7 +330,7 @@ Without a previous day (the first day ever, or `--day` set to it), only the coun
 `SCRAPER_RAW_DIR/<code>/<YYYY-MM-DD>/` (default `data/raw/`, git-ignored). File names mirror the URL
 path (`/api/categories/112/` is `api/categories/112.json`); query parameters are not part of the
 name. `manifest.json` records the supermarket and the capture instant. A full Mercadona catalog is
-about 150 files and 6-10 MB a day; `--save-raw` also keeps the product details it fetched. A second
+154 files and about 5.5 MB a day (measured on 23 October 2026); `--save-raw` also keeps the product details it fetched. A second
 capture on the same day overwrites files with the same name and leaves the others.
 
 `run --from-raw data/raw/mercadona/2026-10-23` processes such an archive with no network at all:
