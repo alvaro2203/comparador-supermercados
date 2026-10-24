@@ -92,9 +92,9 @@ def upgrade_schema(engine: Engine) -> None:
         with migration_connection(engine) as connection:
             config.attributes["connection"] = connection
             _adopt_pre_migration_database(connection, config)
-            previous_revision = _current_revision(connection)
+            previous_revision = schema_revision(connection)
             command.upgrade(config, "head")
-            current_revision = _current_revision(connection)
+            current_revision = schema_revision(connection)
     except SchemaMigrationError:
         raise
     except Exception as exc:
@@ -128,7 +128,7 @@ def _adopt_pre_migration_database(connection: Connection, config: Config) -> Non
     command.stamp(config, BASELINE_REVISION)
 
 
-def _current_revision(connection: Connection) -> str | None:
+def schema_revision(connection: Connection) -> str | None:
     """Return the migration revision the database is at, or ``None`` if it has none."""
     return MigrationContext.configure(connection).get_current_revision()
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 
 from supermarket_scraper.application.price_report import DEFAULT_TOP
 from supermarket_scraper.bootstrap import Container, build_container
@@ -21,8 +22,10 @@ from supermarket_scraper.domain.entities import RunStatus
 from supermarket_scraper.domain.exceptions import DomainError, UnknownSupermarketError
 from supermarket_scraper.domain.value_objects import SupermarketCode
 from supermarket_scraper.infrastructure.logging_setup import configure_logging
+from supermarket_scraper.infrastructure.persistence.data_copy import copy_database
 from supermarket_scraper.infrastructure.persistence.database import (
     SchemaMigrationError,
+    build_engine,
     upgrade_schema,
 )
 
@@ -140,6 +143,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--top", type=int, default=DEFAULT_TOP, help="Products listed per section (default: 10)."
     )
 
+    copy_db = commands.add_parser(
+        "copy-db",
+        help="Copy the configured database into an empty one (for example SQLite to PostgreSQL).",
+    )
+    copy_db.add_argument(
+        "--to",
+        dest="target_url",
+        required=True,
+        metavar="URL",
+        help="SQLAlchemy URL of the target.",
+    )
+    copy_db.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Copy and verify, then roll back: the target keeps its empty tables only.",
+    )
+
     history = commands.add_parser("history", help="Show the latest runs of a supermarket.")
     history.add_argument("supermarket", metavar="SUPERMARKET")
     history.add_argument("--limit", type=int, default=10)
@@ -187,6 +207,7 @@ def _execute(container: Container, args: argparse.Namespace) -> int:
         "list": lambda: _list(container),
         "report": lambda: _report(container, args.supermarkets, args.day, args.top),
         "history": lambda: _history(container, args.supermarket, args.limit),
+        "copy-db": lambda: _copy_db(container, args.target_url, dry_run=args.dry_run),
         "enrich": lambda: asyncio.run(_enrich(container, args.supermarkets, args.limit)),
         "dump": lambda: asyncio.run(_dump(container, args.supermarkets)),
         "run": lambda: asyncio.run(
@@ -383,6 +404,27 @@ def _product_section(title: str, products: Sequence[Product], top: int) -> list[
     if len(products) > top:
         lines.append(f"    ... and {len(products) - top} more")
     return lines
+
+
+def _copy_db(container: Container, target_url: str, *, dry_run: bool) -> int:
+    """Copy the configured database into an empty target and print the rows moved."""
+    if make_url(target_url) == make_url(container.settings.database_url):
+        sys.stderr.write("--to must be a different database from SCRAPER_DATABASE_URL\n")
+        return ExitCode.USAGE
+    target = build_engine(target_url)
+    try:
+        upgrade_schema(container.engine)
+        upgrade_schema(target)
+        report = copy_database(container.engine, target, dry_run=dry_run)
+    finally:
+        target.dispose()
+    outcome = "verified and rolled back (dry run)" if dry_run else "copied and verified"
+    lines = [
+        f"Database {outcome}:",
+        *(f"  {name:<20} {rows}" for name, rows in report.rows.items()),
+    ]
+    sys.stdout.write("\n".join(lines) + "\n")
+    return ExitCode.OK
 
 
 def _history(container: Container, code: str, limit: int) -> int:

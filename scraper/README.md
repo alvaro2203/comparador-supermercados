@@ -129,6 +129,7 @@ comparador-supermercados/          # repository root
     │   │   │   ├── column_types.py     # ExactDecimal, UtcDateTime
     │   │   │   ├── upsert.py           # per-dialect upsert strategies
     │   │   │   ├── repositories.py     # SQL repository implementations
+    │   │   │   ├── data_copy.py        # copy_database: whole-database copy (copy-db)
     │   │   │   ├── unit_of_work.py
     │   │   │   ├── database.py         # engine factory, upgrade_schema()
     │   │   │   └── migrations/         # Alembic env.py, script template, versions/
@@ -266,6 +267,7 @@ uv run supermarket-scraper history mercadona
 | `dump [CODE ...]` | Download each catalog to the raw archive and validate it, without opening the database. |
 | `report [CODE ...] [--day YYYY-MM-DD] [--top N]` | Offline: compare a day of stored prices (default: the latest) with the previous day that has prices. See "Price report" below. |
 | `enrich [CODE ...] [--limit N]` | Fetch details (EAN, brand, ingredients) for every product never enriched, or at most N per chain. Commits every 100 products, so an interrupted backfill resumes where it stopped; stops if a whole chunk fails. Prints the reason for each failed product (up to 20; every one goes to the log as `Detail enrichment failure`). Not recorded in `scrape_runs`. |
+| `copy-db --to URL [--dry-run]` | Copy the configured database (`SCRAPER_DATABASE_URL`) into an empty one of the same migration, for example SQLite to PostgreSQL. Keeps every id and link, reads the source only, and refuses a target that has rows. Row counts and price totals are compared before it commits; `--dry-run` does the copy and the checks and then rolls back (the target keeps empty tables). |
 | `history CODE [--limit N]` | Show the latest runs and their counters, with price changes split into `up` / `down` (regular price) and `promo+` / `promo-` (promotion started / ended); `-` for runs recorded before the split existed. |
 
 ### Price report
@@ -471,7 +473,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 160 tests, ~95% branch coverage
+uv run pytest --cov         # 165 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 

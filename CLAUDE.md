@@ -59,6 +59,7 @@ uv run supermarket-scraper run --save-raw     # normal run that also archives th
 uv run supermarket-scraper run --from-raw data/raw/mercadona/<day>   # process an archive, offline
 uv run supermarket-scraper report [CODE ...] [--day YYYY-MM-DD] [--top N]   # day vs previous day
 uv run supermarket-scraper history mercadona [--limit N]
+uv run supermarket-scraper copy-db --to URL [--dry-run]   # copy the configured DB into an empty one
 ```
 
 `run` without `--dry-run` hits the real Mercadona API (~150 requests, plus up to 500 details) and

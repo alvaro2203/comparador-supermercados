@@ -19,9 +19,9 @@ el anterior falla.**
 | Pieza | Estado |
 |---|---|
 | Workflow `daily-scrape.yml` | Escrito. El YAML es válido, pero nunca se ha ejecutado en GitHub. |
-| Que Mercadona responda a las IP de GitHub | **Sin comprobar** (paso 4). |
-| Migraciones en PostgreSQL | **Sin comprobar.** Solo están probadas en SQLite (paso 5). |
-| Copiar el histórico de SQLite a Neon | **Herramienta sin escribir** (paso 6). |
+| Que Mercadona responda a las IP de GitHub | Comprobado (paso 4): el `dry_run` del 24 de octubre descargó el catálogo completo. |
+| Migraciones en PostgreSQL | Comprobado en un PostgreSQL 17 local (paso 5). Falta verlo en Neon. |
+| Copiar el histórico de SQLite a Neon | Comando `copy-db` escrito y probado en local; **sin ejecutar contra Neon** (paso 6). |
 
 ---
 
@@ -104,36 +104,50 @@ Mercadona podría bloquearlos o redirigirlos. Se prueba antes de depender de ell
 El artefacto `raw-json-<número>` de esa ejecución contiene los JSON descargados. Puedes bajarlo
 para ver que el volcado es completo (unos 154 ficheros).
 
-## Paso 5. Comprobar las migraciones en PostgreSQL (lo hago yo)
+## Paso 5. Comprobar las migraciones en PostgreSQL (hecho)
 
-Las 5 migraciones están probadas solo en SQLite. PostgreSQL se comporta distinto (tipos, nombres de
-restricciones, el modo batch de Alembic...). **Pídeme que lo pruebe** con un PostgreSQL local:
+Probado el 24 de octubre de 2026 con un PostgreSQL 17 en Docker:
 
-1. Arranca **Docker Desktop** y espera a que diga "Engine running".
-2. Dime que ya está. Levanto un contenedor de PostgreSQL, aplico las migraciones, ejecuto el
-   conjunto de tests contra él y te cuento qué falla, si algo falla.
+- Las 5 migraciones se aplican de una vez (`0001` → `0005`) y el esquema resultante coincide con
+  `tables.py` (0 diferencias).
+- 36 tests de persistencia, caso de uso, sucesores e informe pasan contra PostgreSQL.
+- `report` y `history` dan el mismo resultado que en SQLite, y reprocesar el volcado real del 23 de
+  octubre (`run --from-raw`) sobre PostgreSQL no duplica ningún precio.
 
-Si te saltas este paso, el primer `run` real creará el esquema directamente en Neon. Si una
-migración falla, PostgreSQL la deshace entera (las migraciones son transaccionales) y el
-`run` termina con código 2 sin dejar nada a medias. El riesgo es bajo, pero es mejor descubrirlo en
-local.
+Sin comprobar: **Neon en concreto** (red, SSL, suspensión del cómputo). Eso se ve en el paso 6.
 
-**Comprobar:** te confirmo que las 5 migraciones aplican y que `upgrade_schema()` deja el esquema
-idéntico al de `tables.py`.
+## Paso 6. Copiar el histórico a Neon
 
-## Paso 6. Decidir qué pasa con el histórico actual
+Tu `scraper/data/supermarkets.db` (4 días: 18, 20, 21 y 23 de octubre) se copia con el comando
+`copy-db`. Solo lee tu fichero local, nunca lo modifica, y se niega a copiar si Neon ya tiene datos.
+Antes de la copia real hay un ensayo que hace todo y lo deshace.
 
-Tu `scraper/data/supermarkets.db` tiene 4 días de precios (18, 20, 21 y 23 de octubre).
+En PowerShell:
 
-| Opción | Consecuencia |
-|---|---|
-| **Empezar de cero en Neon** | Pierdes esos 4 días en la nube, pero los conservas en tu fichero local. No hay que escribir nada. El histórico en Neon empieza el primer día de ejecución. |
-| **Copiar el histórico a Neon** | Hay que escribir una herramienta de copia. Yo la escribo y la pruebo contra el PostgreSQL de Docker antes de tocar Neon. |
+```powershell
+cd D:\Programacion\comparador-supermercados\scraper
+uv sync --extra postgres
+$neon = "postgresql+psycopg://...tu cadena de Neon..."
 
-Los 4 días tienen un fallo conocido (precios "por 100 g" sin unidad de referencia, y IVA vacío).
-Aun así son datos reales. Dime cuál prefieres.
+uv run supermarket-scraper copy-db --to $neon --dry-run   # ensayo: copia, verifica y deshace
+uv run supermarket-scraper copy-db --to $neon             # copia real
 
-> **No borres ni muevas `scraper/data/supermarkets.db`.** Es la única copia de esos 4 días.
+Remove-Variable neon
+```
+
+**Comprobar:** ambos comandos terminan con una tabla de filas copiadas. Deben salir (a 24 de
+octubre): `supermarkets 1`, `categories 622`, `products 4315`, `product_categories 4583`,
+`price_snapshots 17125`, `scrape_runs 7`. Si el ensayo da error, no hagas la copia real y envía el
+mensaje.
+
+Qué comprueba el comando antes de confirmar: que ambas bases están en la misma migración, que el
+destino está vacío, que cada tabla tiene las mismas filas y que la suma de los importes coincide.
+Cualquier diferencia deshace toda la copia. Después puedes comprobarlo con
+`$env:SCRAPER_DATABASE_URL = $neon` y `uv run supermarket-scraper report`, que debe dar lo mismo
+que en local.
+
+> **No borres ni muevas `scraper/data/supermarkets.db`.** Sigue siendo tu copia de seguridad hasta
+> que la nube lleve varias semanas funcionando.
 
 ## Paso 7. Primera ejecución real
 
