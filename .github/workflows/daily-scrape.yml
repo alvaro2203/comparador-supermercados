@@ -1,0 +1,45 @@
+name: daily-scrape
+
+on:
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Scrape and validate without writing to the database"
+        type: boolean
+        default: true
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: scraper
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SCRAPER_DATABASE_URL: ${{ secrets.SCRAPER_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "scraper/uv.lock"
+      - run: uv sync --locked --no-dev --extra postgres
+      - run: uv run --no-sync supermarket-scraper run --save-raw ${{ inputs.dry_run && '--dry-run' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: raw-json-${{ github.run_id }}
+          path: scraper/data/raw
+          retention-days: 14
+          if-no-files-found: ignore
