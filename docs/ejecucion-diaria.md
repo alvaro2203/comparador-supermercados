@@ -18,10 +18,11 @@ el anterior falla.**
 
 | Pieza | Estado |
 |---|---|
-| Workflow `daily-scrape.yml` | Escrito. El YAML es válido, pero nunca se ha ejecutado en GitHub. |
+| Workflow `daily-scrape.yml` | Funcionando. Primera ejecución programada sin ayuda: 25 de octubre de 2026. |
 | Que Mercadona responda a las IP de GitHub | Comprobado (paso 4): el `dry_run` del 24 de octubre descargó el catálogo completo. |
-| Migraciones en PostgreSQL | Comprobado en un PostgreSQL 17 local (paso 5). Falta verlo en Neon. |
-| Copiar el histórico de SQLite a Neon | Comando `copy-db` escrito y probado en local; **sin ejecutar contra Neon** (paso 6). |
+| Migraciones en PostgreSQL | Comprobado en local y en Neon; además, el CI las prueba en PostgreSQL en cada PR. |
+| Copiar el histórico de SQLite a Neon | Hecho con `copy-db` el 24 de octubre (paso 6). |
+| Entornos `production` y `staging` | Hechos y probados el 25 de octubre (ver `docs/entorno-de-pruebas.md`, parte B). |
 
 ---
 
@@ -75,6 +76,12 @@ copia el error y arréglalo primero. Es la primera vez que el CI corre fuera de 
 > chat, ni en una issue. El repositorio es público.
 
 ## Paso 3. Guardar la cadena como secreto en GitHub
+
+> **Actualizado el 25 de octubre de 2026.** El secreto ya no es de repositorio: cada entorno de GitHub
+> (`production` y `staging`) tiene su propio `SCRAPER_DATABASE_URL`, y `production` solo acepta
+> ejecuciones desde `main`. Si vuelves a montar esto desde cero, sigue
+> `docs/entorno-de-pruebas.md`, parte B, en vez de este paso. Lo de abajo es cómo se hizo al
+> principio.
 
 1. En el repositorio: **Settings → Secrets and variables → Actions → New repository secret**.
 2. Nombre: `SCRAPER_DATABASE_URL` (exactamente así).

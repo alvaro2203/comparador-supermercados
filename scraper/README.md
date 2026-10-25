@@ -379,13 +379,23 @@ below need no extra step after an update.
 ### GitHub Actions
 
 `.github/workflows/daily-scrape.yml` runs `run --save-raw` every day at 05:30 UTC against the
-PostgreSQL database in the repository secret `SCRAPER_DATABASE_URL` (Neon), and uploads the raw
-JSON as an artifact kept for 14 days. A manual run from the Actions tab asks for a `target`
-(`staging` by default, `production` only from `main`) and is a real run unless its `dry_run` box is
-ticked; the scheduled run always targets `production`. Mercadona accepting GitHub's IP addresses and a manual run writing to
-Neon were checked on 24 October 2026; the first run started by the schedule itself was not yet
-observed. Setup steps, the one-off history copy (`copy-db`) and troubleshooting are in
-[docs/ejecucion-diaria.md](../docs/ejecucion-diaria.md). The Windows, cron and systemd runners
+production PostgreSQL database (Neon) and uploads the raw JSON as an artifact kept for 14 days,
+named `raw-json-<target>-<run id>`. It has run on its own since 25 October 2026.
+
+The database comes from the GitHub environment the job runs in, each with its own
+`SCRAPER_DATABASE_URL` secret (there is no repository-level one):
+
+| Environment | Database | Who can use it |
+|---|---|---|
+| `production` | Neon's main branch, the real history | The schedule, and manual runs from `main` only |
+| `staging` | Neon branch `staging`, a copy of production for rehearsals | Manual runs from any branch |
+
+A manual run from the Actions tab asks for a `target` (`staging` by default) and is a real run
+unless its `dry_run` box is ticked; choosing `production` from any branch but `main` is refused by
+GitHub before any step runs. Run SQL, migrations and unreviewed branches against `staging` first;
+reset it from production in Neon when it gets stale. Setup and troubleshooting are in
+[docs/ejecucion-diaria.md](../docs/ejecucion-diaria.md) and
+[docs/entorno-de-pruebas.md](../docs/entorno-de-pruebas.md). The Windows, cron and systemd runners
 below stay available as alternatives; do not run two of them against different databases.
 
 ### Windows (Task Scheduler)
@@ -522,22 +532,28 @@ whose message does not match is rejected. Merge, revert and `fixup!` commits are
 | a breaking change | minor: `0.2.0` → `0.3.0` (`major_version_zero`) | `1.2.0` → `2.0.0` |
 | only `docs`, `test`, `chore`, `build`, `ci`, `style` | no release | no release |
 
-To release, from `scraper/` and with **everything committed** (`cz bump` commits with `git commit -a`,
-so any other pending change would end up in the release commit):
+**Releases are automatic.** `.github/workflows/release.yml` runs on every push to `main` (that is,
+every merged pull request, whose squash title is the commit message). It runs `cz bump`: if there
+is a `feat`, `fix`, `refactor`, `perf` or breaking commit since the last tag, it updates the version
+in `pyproject.toml` and `uv.lock`, adds the release to `CHANGELOG.md` (only the new section;
+earlier ones keep any manual edits), commits them as `bump: version 0.2.0 → 0.3.0`, creates the
+annotated tag `v0.3.0`, pushes both to `main` and publishes a GitHub release with that changelog
+section. Otherwise it does nothing. The `bump:` commit it pushes does not trigger another release.
+
+It pushes through a deploy key (secret `RELEASE_DEPLOY_KEY` in the GitHub environment `release`,
+which only accepts `main`) that is in the bypass list of the `main` ruleset; the setup is in
+[docs/flujo-github.md](../docs/flujo-github.md). It can also be started by hand from the Actions
+tab. **Do not run `cz bump` locally**: the release workflow would then find nothing to do, but your
+local commit would diverge from `main`.
 
 ```powershell
-git status                         # must be clean
-uv run cz bump --dry-run           # preview: next version, tag and changelog entry
-uv run cz bump                     # write it: see below
-uv run cz bump --increment MAJOR   # force a level, e.g. 1.0.0 when the project is ready
+uv run cz bump --dry-run           # safe: preview what the next merge would release
 ```
 
-`cz bump` updates the version in `pyproject.toml` and `uv.lock`, adds the release to
-`CHANGELOG.md` (only the new section; earlier ones keep any manual edits), commits them as
-`bump: version 0.1.0 → 0.2.0` and creates the annotated tag `v0.2.0`. It does not push: run
-`git push --follow-tags` when the repository has a remote. The running program reports the same
-number through `supermarket-scraper --version`, read from the installed package metadata, so there
-is no second copy of the version in the code.
+To force a level (for example `1.0.0` when the project is ready), merge a commit with a breaking
+change (`feat!: ...`) after removing `major_version_zero` from `[tool.commitizen]`. The running
+program reports the version through `supermarket-scraper --version`, read from the installed package
+metadata, so there is no second copy of the version in the code.
 
 ---
 

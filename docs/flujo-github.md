@@ -61,7 +61,7 @@ si quieres, pero con ella abierta ya existen los checks.
 |---|---|
 | Ruleset name | `proteger-main` |
 | Enforcement status | **Active** |
-| Bypass list | **Add bypass → Repository admin**, con *Bypass mode: Always allow*. Es lo que te deja hacer `cz bump` directamente sobre `main`. |
+| Bypass list | **Add bypass → Repository admin**, con *Bypass mode: Always allow*. Te deja hacer push directo a `main` en una emergencia. Las versiones ya no lo necesitan: usan la clave de despliegue de "Versiones automáticas". |
 | Target branches | **Add target → Include default branch** |
 
 Reglas (*Branch rules*), marca estas y deja el resto como está:
@@ -86,25 +86,95 @@ las reglas. Borra después ese commit vacío o déjalo. Para ver la protección 
 comprueba que el botón de fusionar está desactivado mientras el CI corre.
 
 > Si prefieres no poder hacer push directo ni tú, pon *Bypass mode: Pull requests only* o quita la
-> excepción. El coste es que `cz bump` tendrá que hacerse en una rama y fusionarse con una PR.
+> excepción. Las versiones automáticas no se ven afectadas.
 
-## Publicar una versión (`cz bump`)
+## Versiones automáticas
 
-Con la excepción de administrador, se hace como hasta ahora, en `main` y con el árbol limpio:
+Cada fusión a `main` lanza el workflow `release` (`.github/workflows/release.yml`). Si desde la última
+etiqueta hay algún `feat`, `fix`, `refactor`, `perf` o cambio incompatible, el workflow:
+
+- sube la versión en `pyproject.toml` y `uv.lock`;
+- añade la sección nueva a `scraper/CHANGELOG.md`;
+- hace el commit `bump: version X → Y` en `main` y crea la etiqueta `vY`;
+- publica una *release* en la pestaña **Releases** de GitHub.
+
+Si solo hay `docs`, `ci`, `chore`, `test`..., no hace nada. **No ejecutes `cz bump` en tu PC**; para
+ver qué saldría en la próxima fusión, `uv run cz bump --dry-run` desde `scraper/` es seguro.
+
+Tras cada fusión, antes de crear una rama nueva, haz `git switch main` y `git pull` para traerte el
+commit `bump:`.
+
+### Configuración única (en este orden)
+
+El workflow necesita hacer push a `main`, que está protegida. Lo hace con una **clave de despliegue**
+que es la única excepción del ruleset para ese push.
+
+**1. Subir la etiqueta `v0.2.0`, antes de fusionar la PR del workflow.** Solo existe en tu PC. Sin ella
+en GitHub, la primera release no sabe dónde empezó la anterior y repetiría todo el historial.
 
 ```powershell
-git switch main
-git pull
-cd scraper
-uv run cz bump --dry-run     # vista previa
-uv run cz bump               # commit "bump: version ..." y etiqueta vX.Y.Z
-git push --follow-tags
+cd D:\Programacion\comparador-supermercados
+git push origin v0.2.0
 ```
 
-## Probar una rama contra producción
+Comprobar: en GitHub, **Code → Tags** aparece `v0.2.0`.
 
-*Actions → daily-scrape → Run workflow* deja elegir la rama. Eso ejecuta **ese código** contra Neon.
-Con código sin revisar, marca siempre **dry_run**.
+**2. Crear la clave** (en PowerShell; cuando pida *passphrase*, pulsa Enter dos veces, sin escribir
+nada):
+
+```powershell
+ssh-keygen -t ed25519 -C "release-bot" -f "$env:TEMP\release_key"
+```
+
+Crea dos ficheros: `release_key` (privada) y `release_key.pub` (pública).
+
+**3. Dar la clave pública al repositorio.** **Settings → Deploy keys → Add deploy key.**
+- Title: `release-bot`.
+- Key: el contenido de `release_key.pub` (`Get-Content "$env:TEMP\release_key.pub"`).
+- Marca **Allow write access**. Sin esto, el push falla.
+
+**4. Guardar la clave privada en un entorno que solo acepte `main`.**
+**Settings → Environments → New environment** → `release`.
+- **Deployment branches and tags → Selected branches and tags → Add rule:** `main`.
+- **Environment secrets → Add secret:** nombre `RELEASE_DEPLOY_KEY`, valor el contenido **completo**
+  de `release_key` (`Get-Content "$env:TEMP\release_key" -Raw`), incluidas las líneas
+  `-----BEGIN OPENSSH PRIVATE KEY-----` y `-----END OPENSSH PRIVATE KEY-----`.
+
+Después, borra los dos ficheros de tu PC:
+`Remove-Item "$env:TEMP\release_key", "$env:TEMP\release_key.pub"`.
+
+**5. Dejar que esa clave se salte el ruleset.** **Settings → Rules → Rulesets → `proteger-main` →
+Bypass list → Add bypass → Deploy keys**, con *Always allow*. Guarda.
+
+Ahora la excepción de administrador ya no hace falta para las versiones. Si quieres que tampoco tú
+puedas hacer push directo a `main` (el accidente de `ci/staging-target`), cambia *Repository admin*
+a *Pull requests only* o quítalo.
+
+**6. Fusionar la PR del workflow y comprobar la primera release.** Al fusionar, **Actions → release**
+debe acabar en verde y:
+- en `main` aparece el commit `bump: version 0.2.0 → 0.3.0`, de `github-actions[bot]`;
+- en **Releases** está `v0.3.0`, con la sección del CHANGELOG;
+- en tu PC, `git switch main; git pull` y `uv run supermarket-scraper --version` muestra `0.3.0`.
+
+Los nombres exactos de los botones de GitHub (sobre todo *Deploy keys* dentro de la *Bypass list*)
+son de memoria: si no aparece esa opción, dímelo y buscamos la alternativa.
+
+### Si algo falla
+
+| Síntoma en **Actions → release** | Causa | Qué hacer |
+|---|---|---|
+| `Permission to ... denied` o `protected branch` al hacer `git push` | La clave no tiene escritura o no está en la *Bypass list* | Pasos 3 y 5 |
+| `Load key ... invalid format` en el checkout | El secreto no tiene la clave privada completa | Paso 4, pegando también las líneas `BEGIN`/`END` |
+| `Branch ... is not allowed to deploy to release` | Lo lanzaste a mano desde otra rama | Es correcto: solo desde `main` |
+| La release `v0.3.0` incluye todo el historial desde el principio | Faltaba la etiqueta `v0.2.0` en GitHub | Edita el CHANGELOG a mano en una PR; la siguiente release ya será correcta |
+| `NO_COMMITS_TO_BUMP` en el log y acaba en verde | La fusión solo tenía `docs`, `ci`, `chore`... | Es lo esperado: no hay versión nueva |
+
+## Probar una rama con datos reales
+
+*Actions → daily-scrape → Run workflow* deja elegir la rama y el `target`. Con código sin revisar,
+usa siempre `target: staging` (el valor por defecto): escribe en la rama `staging` de Neon, no en
+producción. GitHub rechaza `target: production` desde cualquier rama que no sea `main`. Detalles en
+`docs/entorno-de-pruebas.md`, parte B.
 
 ## Problemas conocidos
 

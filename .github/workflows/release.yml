@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: ${{ !startsWith(github.event.head_commit.message, 'bump:') }}
+    runs-on: ubuntu-latest
+    environment: release
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "scraper/uv.lock"
+      - run: uv sync --locked
+      - name: Bump version and changelog
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          before="$(uv run --no-sync cz version --project)"
+          uv run --no-sync cz --no-raise 3,21 bump --yes --changelog-to-stdout \
+            --git-output-to-stderr > "$RUNNER_TEMP/release-notes.md"
+          after="$(uv run --no-sync cz version --project)"
+          if [ "$before" = "$after" ]; then
+            echo "No feat, fix, refactor or perf commit since v$before: nothing to release."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=$after" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.bump.outputs.released == 'true'
+        run: git push --follow-tags origin HEAD:main
+      - if: steps.bump.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: gh release create "v$VERSION" --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"

@@ -24,40 +24,35 @@ No hay tareas P0 abiertas.
 
 ## P1 · Histórico continuo
 
-- [ ] **Programar la ejecución diaria.** Montada y probada a mano; falta ver la primera ejecución
-  programada.
-  - **Hecho (24 oct):** `.github/workflows/daily-scrape.yml` ejecuta `run --save-raw` cada día a las
-    05:30 UTC contra PostgreSQL en Neon (secreto `SCRAPER_DATABASE_URL`). Probado: Mercadona acepta
-    las IP de GitHub (`dry_run` completo) y una ejecución manual real escribió en Neon. El histórico
-    de 4 días se copió con `copy-db`. Guía: `docs/ejecucion-diaria.md`.
-  - **Pendiente:** comprobar que el `cron` lanza la ejecución del 25 de octubre sin ayuda y que
-    `report` compara el 25 con el 24. Cuando salga verde dos días seguidos, marcar como hecha.
+- [x] **Programar la ejecución diaria.**
+  - **Hecho:** `.github/workflows/daily-scrape.yml` ejecuta `run --save-raw` cada día a las 05:30 UTC
+    contra PostgreSQL en Neon. Primera ejecución programada sin ayuda: 25 de octubre de 2026,
+    comprobada en Neon. El histórico de 4 días se copió con `copy-db`. Guía:
+    `docs/ejecucion-diaria.md`.
   - **Sigue abierto:** faltan el 19 y el 22 de octubre, y no se pueden recuperar.
 - [ ] **Copia de seguridad de la base de datos.**
   - **Situación:** el histórico no se puede volver a descargar. Con Neon, la base ya no es un único
     fichero en tu PC, pero sigue siendo una sola copia: un `DELETE` a mano sobre `supermarkets`
-    borraría en cascada todo el histórico de la cadena.
+    borraría en cascada todo el histórico de la cadena. La rama `staging` no es una copia de
+    seguridad: se reinicia desde producción y se usa para ensayar.
   - **Hacer:** comprobar en el panel de Neon qué restauración ofrece el plan gratuito (ventana de
-    tiempo y cómo se usa) y probarla una vez en una rama, sin tocar la principal. Si no basta,
-    añadir un volcado periódico (`pg_dump`) como artefacto o en otro almacenamiento. Mientras tanto,
+    tiempo y cómo se usa) y probarla una vez sobre `staging`. Si no basta, añadir un volcado
+    periódico (`pg_dump`) como artefacto o en otro almacenamiento. Mientras tanto,
     `scraper/data/supermarkets.db` es una copia local hasta el 23 de octubre: no la borres.
-- [ ] **Tests contra PostgreSQL en el CI.**
-  - **Situación:** producción es PostgreSQL (Neon), pero el CI solo prueba en SQLite. Las migraciones
-    y los upserts se comprobaron en PostgreSQL una vez, a mano, el 24 de octubre. Una migración que
-    funcione en SQLite y falle en PostgreSQL se descubriría en la ejecución de las 05:30.
-  - **Hacer:** que el fixture `engine` use `SCRAPER_TEST_DATABASE_URL` si existe (solo hosts locales,
-    vaciada antes de cada test), una variante en PostgreSQL de la comprobación del esquema, y un job
-    `postgres` en `ci.yml` con un *service container*. Después, añadir ese check al ruleset.
-    Paso a paso: `docs/entorno-de-pruebas.md`, parte A.
-- [ ] **Base de pruebas `staging`.**
-  - **Situación:** cualquier operación sobre datos (el relleno del IVA, una migración, `copy-db`) se
-    ensaya directamente en producción, y un lanzamiento manual de una rama sin revisar puede escribir
-    en ella.
-  - **Hacer:** una rama `staging` en Neon; entornos `production` (solo desde `main`) y `staging` en
-    GitHub, cada uno con su `SCRAPER_DATABASE_URL`; y un input `target` en `daily-scrape` (por
-    defecto `staging` en los lanzamientos manuales; las programadas siguen en producción). Antes,
-    comprobar cuántas ramas permite el plan gratuito de Neon. Paso a paso:
-    `docs/entorno-de-pruebas.md`, parte B.
+- [x] **Tests contra PostgreSQL en el CI.**
+  - **Hecho (PR #3):** con `SCRAPER_TEST_DATABASE_URL`, el fixture `engine` usa esa base PostgreSQL,
+    vaciada antes de cada test y solo si el host es local (`local_test_database_url`). El job
+    `postgres` de `ci.yml` ejecuta los 74 tests de integración contra un PostgreSQL 17 desechable.
+    Tres tests propios de SQLite usan `sqlite_engine`.
+  - **Comprobar una vez:** que `postgres` está como check obligatorio en el ruleset `proteger-main`
+    (paso A6 de `docs/entorno-de-pruebas.md`).
+- [x] **Base de pruebas `staging`.**
+  - **Hecho y probado el 25 de octubre:** rama `staging` en Neon; entornos `production` (solo desde
+    `main`) y `staging` en GitHub, cada uno con su `SCRAPER_DATABASE_URL`; el secreto de repositorio
+    se retiró. `daily-scrape` tiene el input `target` (por defecto `staging` en los lanzamientos
+    manuales; las programadas van a producción). Probado: una ejecución a `staging` no toca
+    producción, y una rama que no es `main` no puede escribir en producción. Uso del día a día:
+    `docs/entorno-de-pruebas.md`, B5.
   - **No se hace:** un descargador de pruebas diario. Duplicaría las peticiones a Mercadona; los
     fixtures, `--dry-run` y `--from-raw` ya lo cubren.
 - [x] **Guardar el JSON en bruto en la ejecución diaria.**
@@ -66,8 +61,8 @@ No hay tareas P0 abiertas.
 
 ## P2 · Calidad de los datos
 
-- [ ] **El IVA está vacío en el 73 % de los precios.** Arreglado en el código (rama `fix/fill-iva`);
-  falta el relleno del histórico en Neon.
+- [ ] **El IVA está vacío en el 73 % de los precios.** Arreglado en el código (PR #2); falta el
+  relleno del histórico en Neon.
   - **Situación:** el 23 de octubre, 3.120 de 4.275 precios tienen `vat_rate` NULL. El scraper lee
     `price_instructions.iva`, que Mercadona solo rellena en 1.155 productos. El campo
     `tax_percentage` («10.000», «21.000», «4.000») viene en todos, y coincide con `iva` siempre que
@@ -77,8 +72,11 @@ No hay tareas P0 abiertas.
     real (`iva` null en los aceites). Reprocesando el volcado del 23 de octubre: 0 de 4.274 precios
     sin IVA (antes 3.119).
   - **Pendiente, después de la primera ejecución con el arreglo (día `D`):** rellenar una vez los
-    días anteriores en Neon con el IVA que el mismo producto tiene el día `D`. Solo filas NULL. Antes,
-    crear una rama de copia en Neon. Vista previa y relleno, en el SQL Editor:
+    días anteriores en Neon con el IVA que el mismo producto tiene el día `D`. Solo filas NULL.
+    Probablemente `D` = 2026-10-25, la primera ejecución programada con el código nuevo: confírmalo
+    antes con `sin_iva` = 0 en ese día. **Ensáyalo primero en `staging`** (reiníciala desde
+    producción, ejecuta las dos consultas y revisa), y solo entonces en producción. Vista previa y
+    relleno, en el SQL Editor:
     ```sql
     SELECT s.captured_on, count(*)
     FROM price_snapshots s
@@ -143,7 +141,11 @@ No hay tareas P0 abiertas.
 
 ## Herramientas
 
-- [ ] **Primera versión:** `uv run cz bump --yes` desde `scraper/` → `v0.2.0` y `CHANGELOG.md`.
+- [x] **Primera versión:** `v0.2.0` y `CHANGELOG.md`, el 24 de octubre.
+- [ ] **Versiones automáticas en cada fusión a `main`.** Workflow `release.yml` escrito y probado en un
+  clon local (fusión con `feat` → minor; con solo `docs` → nada; con `fix` → patch). Falta la
+  configuración en GitHub (subir la etiqueta `v0.2.0`, clave de despliegue, entorno `release`,
+  excepción en el ruleset) y ver la primera release real. Paso a paso: `docs/flujo-github.md`.
 - [ ] **CI, cuando el repositorio esté en GitHub:**
   - Comprobar los mensajes de commit de cada PR (`cz check --rev-range origin/main..HEAD`).
   - Cambiar `uv sync --frozen` por `uv sync --locked`: `--frozen` no detecta un `uv.lock`
