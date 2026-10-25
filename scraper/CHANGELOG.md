@@ -1,3 +1,15 @@
+## v0.3.0 (2026-10-25)
+
+### Feat
+
+- **docs**: update daily execution guide and add GitHub Actions workflow documentation
+- **cli**: add copy-db to move the history between databases
+- add GitHub Actions workflow for daily scraping with configurable dry run
+
+### Fix
+
+- **mercadona**: read VAT from tax_percentage instead of iva (#2)
+
 ## v0.2.0 (2026-10-24)
 
 ### Feat
