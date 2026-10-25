@@ -1,8 +1,9 @@
 # TODO
 
 Lista revisada el 24 de octubre de 2026 tras auditar la base de datos (precios del 18 al 23 de
-octubre), el volcado JSON del 23 de octubre y el código. Las tareas ya hechas (migraciones, EAN,
-`report`, `dump`, versionado...) están en el historial de git y sus decisiones en el README.
+octubre), el volcado JSON del 23 de octubre y el código, y actualizada el 25 de octubre (P1 y
+Herramientas). Las tareas ya hechas antes del 24 de octubre (migraciones, EAN, `report`, `dump`...)
+están en el historial de git y sus decisiones en el README.
 
 Prioridades:
 
@@ -61,37 +62,29 @@ No hay tareas P0 abiertas.
 
 ## P2 · Calidad de los datos
 
-- [ ] **El IVA está vacío en el 73 % de los precios.** Arreglado en el código (PR #2); falta el
-  relleno del histórico en Neon.
-  - **Situación:** el 23 de octubre, 3.120 de 4.275 precios tienen `vat_rate` NULL. El scraper lee
+- [x] **El IVA está vacío en el 73 % de los precios.**
+  - **Situación:** el 23 de octubre, 3.120 de 4.275 precios tenían `vat_rate` NULL. El scraper leía
     `price_instructions.iva`, que Mercadona solo rellena en 1.155 productos. El campo
     `tax_percentage` («10.000», «21.000», «4.000») viene en todos, y coincide con `iva` siempre que
     los dos existen.
-  - **Hecho:** el scraper lee `tax_percentage`, con `iva` de respaldo (`PriceInstructions.vat_rate`).
-    Es opcional: sin ninguno de los dos, el producto se guarda con IVA NULL. Fixtures con la forma
-    real (`iva` null en los aceites). Reprocesando el volcado del 23 de octubre: 0 de 4.274 precios
-    sin IVA (antes 3.119).
-  - **Pendiente, después de la primera ejecución con el arreglo (día `D`):** rellenar una vez los
-    días anteriores en Neon con el IVA que el mismo producto tiene el día `D`. Solo filas NULL.
-    Probablemente `D` = 2026-10-25, la primera ejecución programada con el código nuevo: confírmalo
-    antes con `sin_iva` = 0 en ese día. **Ensáyalo primero en `staging`** (reiníciala desde
-    producción, ejecuta las dos consultas y revisa), y solo entonces en producción. Vista previa y
-    relleno, en el SQL Editor:
+  - **Hecho (PR #2):** el scraper lee `tax_percentage`, con `iva` de respaldo
+    (`PriceInstructions.vat_rate`). Es opcional: sin ninguno de los dos, el producto se guarda con IVA
+    NULL. Reprocesando el volcado del 23 de octubre: 0 de 4.274 precios sin IVA (antes 3.119).
+  - **Histórico rellenado el 25 de octubre**, primero en `staging` y luego en producción: los días
+    anteriores al 25 copian el IVA que el mismo producto tiene el 25 (solo filas NULL):
     ```sql
-    SELECT s.captured_on, count(*)
-    FROM price_snapshots s
-    JOIN price_snapshots ref
-      ON ref.product_id = s.product_id AND ref.captured_on = DATE 'D' AND ref.vat_rate IS NOT NULL
-    WHERE s.vat_rate IS NULL AND s.captured_on < DATE 'D'
-    GROUP BY 1 ORDER BY 1;
-
     UPDATE price_snapshots s
     SET vat_rate = ref.vat_rate
     FROM price_snapshots ref
-    WHERE ref.product_id = s.product_id AND ref.captured_on = DATE 'D' AND ref.vat_rate IS NOT NULL
-      AND s.vat_rate IS NULL AND s.captured_on < DATE 'D';
+    WHERE ref.product_id = s.product_id
+      AND ref.captured_on = DATE '2026-10-25'
+      AND ref.vat_rate IS NOT NULL
+      AND s.vat_rate IS NULL
+      AND s.captured_on < DATE '2026-10-25';
     ```
-    Los productos retirados antes de `D` no tienen referencia y siguen en NULL.
+  - **Quedan sin IVA a propósito** los productos retirados antes del 25 (40 precios el 18, 4 el 24):
+    no hay ningún día con IVA del que copiarlo, y adivinarlo sería inventar datos. Los precios ya
+    incluyen el IVA, así que no afecta a la comparación. Tu SQLite local (hasta el 23) no se tocó.
 - [ ] **Recalcular los precios de referencia antiguos que se pueden comprobar.**
   - **Situación:** del 18 al 21 de octubre quedan 1.580 precios con `reference_unit = 'unknown'`
     (formatos «por 100 g» y «por 100 ml», antes del arreglo). En 1.424 de ellos, el valor guardado
@@ -142,11 +135,20 @@ No hay tareas P0 abiertas.
 ## Herramientas
 
 - [x] **Primera versión:** `v0.2.0` y `CHANGELOG.md`, el 24 de octubre.
-- [ ] **Versiones automáticas en cada fusión a `main`.** Workflow `release.yml` escrito y probado en un
-  clon local (fusión con `feat` → minor; con solo `docs` → nada; con `fix` → patch). Falta la
-  configuración en GitHub (subir la etiqueta `v0.2.0`, clave de despliegue, entorno `release`,
-  excepción en el ruleset) y ver la primera release real. Paso a paso: `docs/flujo-github.md`.
-- [ ] **CI, cuando el repositorio esté en GitHub:**
-  - Comprobar los mensajes de commit de cada PR (`cz check --rev-range origin/main..HEAD`).
-  - Cambiar `uv sync --frozen` por `uv sync --locked`: `--frozen` no detecta un `uv.lock`
-    desactualizado respecto a `pyproject.toml`.
+- [x] **Versiones automáticas en cada fusión a `main`.**
+  - **Hecho (PR #4):** `.github/workflows/release.yml` ejecuta `cz bump` en cada push a `main`. Con
+    `feat`, `fix`, `refactor` o `perf` desde la última etiqueta, sube la versión, actualiza el
+    CHANGELOG, hace el commit `bump:`, crea la etiqueta y publica la release; con solo `docs`, `ci`,
+    `chore`... no hace nada. Hace push con una clave de despliegue (entorno `release`, solo `main`)
+    que es la excepción del ruleset. Primera release automática: `v0.3.0`, el 25 de octubre.
+    Configuración: `docs/flujo-github.md`.
+- [ ] **Comprobar el título de cada PR.**
+  - **Situación:** con *Squash and merge*, el título de la PR es el único commit que llega a `main`, y
+    de él depende la versión. El hook `commit-msg` solo revisa los commits de tu PC; un título sin
+    formato no genera versión ni aparece en el CHANGELOG, y nada lo avisa.
+  - **Hacer:** un workflow pequeño, en los eventos de PR (abrir, editar el título, nuevos commits),
+    que falle si el título no sigue Conventional Commits (con `cz check --message`), y añadirlo como
+    check obligatorio en el ruleset.
+- [ ] **`uv sync --locked` también en el job `quality` del CI.** Es el único que sigue con
+  `uv sync --frozen`, que no detecta un `uv.lock` desactualizado respecto a `pyproject.toml`. Los
+  demás workflows (`postgres`, `daily-scrape`, `release`) ya usan `--locked`.
