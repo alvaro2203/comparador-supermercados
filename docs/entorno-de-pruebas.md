@@ -6,10 +6,12 @@ y el CI solo prueba en SQLite aunque producción es PostgreSQL.
 
 Son dos piezas independientes. Haz primero la A: es automática y protege cada PR.
 
-| Pieza | Qué protege | Quién la hace |
-|---|---|---|
-| **A. Tests en PostgreSQL en el CI** | Que una migración o una consulta que funciona en SQLite no falle en producción | Código: Claude. Ajustar el ruleset: tú |
-| **B. Base `staging` en Neon** | Ensayar SQL, migraciones y código de una rama con escrituras reales, sin tocar producción | Neon y GitHub: tú. Workflow: Claude |
+| Pieza | Qué protege | Quién la hace | Estado |
+|---|---|---|---|
+| **A. Tests en PostgreSQL en el CI** | Que una migración o una consulta que funciona en SQLite no falle en producción | Código: Claude. Ajustar el ruleset: tú | Hecho (PR #3). 74 tests de integración pasan en PostgreSQL 17 |
+| **B. Base `staging` en Neon** | Ensayar SQL, migraciones y código de una rama con escrituras reales, sin tocar producción | Neon y GitHub: tú. Workflow: Claude | Hecho y probado (B4) el 25 de octubre de 2026 |
+
+Esta guía queda como referencia de cómo está montado. El uso del día a día está en B5.
 
 Lo que **no** se hace, a propósito: un descargador de pruebas que llame a Mercadona a diario. Duplicaría
 las peticiones a un sitio real y no aporta nada que no den los fixtures, `--dry-run` y `--from-raw`.

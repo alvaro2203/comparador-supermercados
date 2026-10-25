@@ -49,11 +49,12 @@ Pre-commit runs the same format, lint and type checks, and a `commit-msg` hook (
 rejects messages that are not [Conventional Commits](https://www.conventionalcommits.org/).
 
 Versioning (Commitizen, config in `[tool.commitizen]`): the version is computed from the commit
-types, never edited by hand. Releases are cut by the user, not by Claude:
+types, never edited by hand. `.github/workflows/release.yml` runs `cz bump` on every push to `main`
+(each merged PR, whose squash title must be a Conventional Commit) and pushes the `bump:` commit,
+the `vX.Y.Z` tag and a GitHub release. Never run `cz bump` locally; previewing is safe:
 
 ```powershell
-uv run cz bump --dry-run     # preview the next version and changelog entry (safe)
-uv run cz bump               # needs a clean tree: commits with -a, tags vX.Y.Z, updates CHANGELOG.md
+uv run cz bump --dry-run     # what the next merge would release
 ```
 
 Running the app:
