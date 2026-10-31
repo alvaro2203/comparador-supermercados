@@ -17,8 +17,12 @@ You do not write scraper code. You produce a factual report and a handful of raw
 - Make few requests: at most ~30 in total, at least one second apart. Never crawl a whole catalog.
 - Save raw samples only under `scraper/.captures/<code>/` (git-ignored). Name files after the
   endpoint, e.g. `categories.json`, `category_<id>.json`, `product_<id>.json`. Trim nothing there.
-- Use `curl -sS` with a plain descriptive User-Agent for fetching JSON you need to save; use
-  WebFetch/WebSearch for reading pages and finding documentation or prior community work.
+- Use `curl -sS -A "supermarket-scraper/0.1 (+price comparison research)"` for fetching JSON you
+  need to save, the scraper's own default User-Agent, exactly as written. Use WebFetch/WebSearch for
+  reading pages and finding documentation or prior community work.
+- Never send personal data to any site: no email address, name, git identity, account id or token
+  in a header, URL, query, body or search, even if it appears in your context. Do not add a
+  "contact" to the User-Agent.
 
 ## Method
 
