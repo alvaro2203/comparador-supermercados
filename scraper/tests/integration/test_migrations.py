@@ -353,6 +353,126 @@ def stored_gtins(engine: Engine) -> dict[str, str | None]:
         return {row.external_id: row.gtin for row in rows}
 
 
+REFERENCE_CASES = (
+    ("oregano", "kg", Decimal("1.95"), Decimal(4), Decimal(40), ("kg", Decimal(40))),
+    (
+        "detergent",
+        "l",
+        Decimal("7.95"),
+        Decimal("0.265"),
+        Decimal("5.89"),
+        ("wash", Decimal("0.265")),
+    ),
+    ("eggs", "ud", Decimal("2.625"), Decimal("2.625"), None, ("unit", Decimal("0.2188"))),
+    ("repriced", "kg", Decimal("1.00"), Decimal(2), Decimal(25), ("kg", Decimal(21))),
+)
+"""External id, size format, shelf price, stored reference and bulk on 18 October, and the
+reference that the fixed parser stored on 23 October (the repriced one at a new shelf price)."""
+
+
+def insert_product(
+    connection: Connection, external_id: str, size_format: str, *, active: bool = True
+) -> int:
+    key = connection.execute(
+        products.insert().values(
+            supermarket_code="mercadona",
+            external_id=external_id,
+            name=external_id,
+            size_format=size_format,
+            selling_method="unit",
+            is_active=active,
+            first_seen_at=SEEN_AT,
+            last_seen_at=SEEN_AT,
+        )
+    ).inserted_primary_key
+    assert key is not None
+    return int(key[0])
+
+
+def seed_unknown_reference_prices(connection: Connection) -> None:
+    insert_price_history(connection)
+    day_before_fix = date(2026, 10, 18)
+    day_after_fix = date(2026, 10, 23)
+    for external_id, size_format, amount, reference, bulk, (unit, fixed) in REFERENCE_CASES:
+        product_id = insert_product(connection, external_id, size_format)
+        snapshot = {"product_id": product_id, "captured_at": SEEN_AT, "currency": "EUR"}
+        connection.execute(
+            price_snapshots.insert().values(
+                **snapshot,
+                captured_on=day_before_fix,
+                amount=amount,
+                reference_amount=reference,
+                reference_unit="unknown",
+                bulk_amount=bulk,
+            )
+        )
+        later_amount = Decimal("1.05") if external_id == "repriced" else amount
+        connection.execute(
+            price_snapshots.insert().values(
+                **snapshot,
+                captured_on=day_after_fix,
+                amount=later_amount,
+                reference_amount=fixed,
+                reference_unit=unit,
+                bulk_amount=bulk,
+            )
+        )
+    for external_id, size_format, bulk in (
+        ("shampoo", "l", Decimal("9.29")),
+        ("freshener", "ud", Decimal("1.85")),
+    ):
+        product_id = insert_product(connection, external_id, size_format, active=False)
+        connection.execute(
+            price_snapshots.insert().values(
+                product_id=product_id,
+                captured_at=SEEN_AT,
+                currency="EUR",
+                captured_on=day_before_fix,
+                amount=Decimal("3.25"),
+                reference_amount=Decimal("0.929"),
+                reference_unit="unknown",
+                bulk_amount=bulk,
+            )
+        )
+
+
+def stored_references(engine: Engine) -> dict[tuple[str, date], tuple[str, Decimal | None]]:
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(
+                products.c.external_id,
+                price_snapshots.c.captured_on,
+                price_snapshots.c.reference_unit,
+                price_snapshots.c.reference_amount,
+            ).join(products, products.c.id == price_snapshots.c.product_id)
+        )
+        return {
+            (row.external_id, row.captured_on): (row.reference_unit, row.reference_amount)
+            for row in rows
+        }
+
+
+def test_reference_price_migration_fixes_only_the_rows_it_can_check(engine: Engine) -> None:
+    downgrade_to(engine, "0005")
+    with engine.begin() as connection:
+        seed_unknown_reference_prices(connection)
+    before = stored_references(engine)
+
+    migrate_to(engine, "head")
+
+    after = stored_references(engine)
+    day = date(2026, 10, 18)
+    assert after[("oregano", day)] == ("kg", Decimal(40))
+    assert after[("detergent", day)] == ("wash", Decimal("0.265"))
+    assert after[("eggs", day)] == ("unit", Decimal("0.2188"))
+    assert after[("shampoo", day)] == ("l", Decimal("9.29"))
+    assert after[("repriced", day)] == ("unknown", Decimal(2))
+    assert after[("freshener", day)] == ("unknown", Decimal("0.929"))
+    untouched = {key: value for key, value in before.items() if key[1] != day}
+    assert {key: after[key] for key in untouched} == untouched
+    assert len(after) == len(before)
+
+
 def test_gtin_migration_backfills_valid_eans_and_survives_a_round_trip(tmp_path: Path) -> None:
     baseline = build_engine(f"sqlite:///{tmp_path / 'baseline.db'}")
     migrate_to(baseline, BASELINE_REVISION)
