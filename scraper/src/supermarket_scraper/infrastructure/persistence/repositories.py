@@ -428,7 +428,11 @@ class SqlPriceRepository(PriceRepository):
 
     @override
     def record(self, observations: Sequence[PriceObservation]) -> PriceRecordResult:
-        """Upsert one snapshot per product and day and classify changes versus the prior day."""
+        """Upsert one snapshot per product and day and classify changes versus the stored price.
+
+        The stored price is the latest snapshot up to the observed day, so a rerun on the
+        same day compares with the snapshot it overwrites and counts only what it changed.
+        """
         grouped: defaultdict[tuple[SupermarketCode, date], list[PriceObservation]] = defaultdict(
             list
         )
@@ -438,7 +442,7 @@ class SqlPriceRepository(PriceRepository):
         kinds: list[PriceChangeKind] = []
         for (supermarket, day), batch in grouped.items():
             product_ids = _external_id_map(self._connection, schema.products, supermarket)
-            previous = self._previous_prices(supermarket, day)
+            previous = self._stored_prices(supermarket, day)
             rows: list[Row] = []
             for observation in batch:
                 product_id = product_ids.get(observation.product_external_id)
@@ -512,14 +516,14 @@ class SqlPriceRepository(PriceRepository):
             for row in self._connection.execute(statement)
         }
 
-    def _previous_prices(self, supermarket: SupermarketCode, day: date) -> dict[int, Price]:
-        """Return the latest shelf price before ``day`` for every product of a supermarket."""
+    def _stored_prices(self, supermarket: SupermarketCode, day: date) -> dict[int, Price]:
+        """Return the latest shelf price up to ``day``, inclusive, for every product."""
         prices = schema.price_snapshots
         products = schema.products
         latest = (
             select(prices.c.product_id, func.max(prices.c.captured_on).label("captured_on"))
             .join(products, products.c.id == prices.c.product_id)
-            .where(products.c.supermarket_code == str(supermarket), prices.c.captured_on < day)
+            .where(products.c.supermarket_code == str(supermarket), prices.c.captured_on <= day)
             .group_by(prices.c.product_id)
             .subquery()
         )

@@ -123,7 +123,11 @@ class PriceRepository(ABC):
 
     @abstractmethod
     def record(self, observations: Sequence[PriceObservation]) -> PriceRecordResult:
-        """Store one observation per product and day, idempotently for re-runs."""
+        """Store one observation per product and day, idempotently for re-runs.
+
+        Changes are classified against the latest stored snapshot up to that day, including
+        the one a rerun overwrites, so a rerun with the same prices reports no change.
+        """
 
     @abstractmethod
     def captured_days(self, supermarket: SupermarketCode) -> Sequence[date]:
