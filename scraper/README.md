@@ -184,8 +184,13 @@ For canned and jarred food the reference is per kg of **drained weight**, the le
 differs from Mercadona's `bulk_amount` (per kg of gross weight). Olives at 1,05 € for 350 g with
 150 g drained are 3,00 €/kg gross but 7,00 €/kg drained; `reference_amount` holds the 7,00. Do not
 "fix" it to match `bulk_amount`: about 200 such products are expected to differ.
-Snapshots taken before this fix for formats quoted per `100 g` or `100 ml` (about 530 a day, 18-23
-October 2026) keep `reference_unit = 'unknown'` and their per-100 value: they are not comparable.
+Snapshots taken before this fix for formats quoted per `100 g`, `100 ml`, wash or dozen (about 530
+a day, 18-23 October 2026) were stored with `reference_unit = 'unknown'` and the chain's raw figure.
+Migration `0006` recomputes them, but only where stored data confirms the value: a later snapshot
+of the same product at the same shelf price whose reference is the old one times a format factor
+(10, 1 or 1/12), or, failing that, the old one times 10 equal to the row's own `bulk_amount`. Any
+other row keeps `unknown` (none did on the local copy of 18-23 October). Migration `0006` changes
+no column and its downgrade keeps the corrected values.
 
 **Price changes.** `Price.change_from` classifies each change against the previous observation:
 a promotion starting or ending first, otherwise a regular increase or decrease. `price_changes`
@@ -491,7 +496,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 175 tests, ~95% branch coverage
+uv run pytest --cov         # 176 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 

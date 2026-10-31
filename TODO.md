@@ -85,15 +85,21 @@ No hay tareas P0 abiertas.
   - **Quedan sin IVA a propósito** los productos retirados antes del 25 (40 precios el 18, 4 el 24):
     no hay ningún día con IVA del que copiarlo, y adivinarlo sería inventar datos. Los precios ya
     incluyen el IVA, así que no afecta a la comparación. Tu SQLite local (hasta el 23) no se tocó.
-- [ ] **Recalcular los precios de referencia antiguos que se pueden comprobar.**
-  - **Situación:** del 18 al 21 de octubre quedan 1.580 precios con `reference_unit = 'unknown'`
-    (formatos «por 100 g» y «por 100 ml», antes del arreglo). En 1.424 de ellos, el valor guardado
-    por 10 coincide exactamente con el `bulk_amount` (€/kg o €/l) que se guardó en la misma fila,
-    así que el valor correcto es seguro, no adivinado.
-  - **Hacer:** una migración de datos (o un comando puntual) que corrija solo esas filas, con
-    `reference_unit` en kg o l, y deje como `unknown` las ~160 restantes (sobre todo conservas con
-    peso escurrido). Reescribe histórico: **necesita tu visto bueno**, y antes una copia de la base
-    de datos.
+- [ ] **Recalcular los precios de referencia antiguos que se pueden comprobar.** Migración escrita;
+  falta ensayarla en `staging` y aplicarla en producción.
+  - **Situación:** del 18 al 23 de octubre quedan 1.587 precios con `reference_unit = 'unknown'`
+    (formatos «por 100 g», «por 100 ml», «por lavado» y «por docena», antes del arreglo).
+  - **Hecho (visto bueno dado el 31 de octubre):** migración de datos `0006`. Corrige una fila solo
+    si los datos guardados confirman el valor: un día posterior, el mismo producto, al mismo precio
+    de estante, tiene una unidad conocida y una referencia igual a la antigua por un factor de
+    formato (×10, ×1 o ÷12); o, si no, la antigua ×10 coincide con su propio `bulk_amount` y la
+    unidad (la última conocida del producto o su `size_format`) es kg o l. No toca nada más.
+  - **Medido:** en producción (solo lectura), 1.577 de las 1.587 filas cumplen la primera regla o la
+    de `bulk_amount` con unidad posterior; las 10 restantes (3 productos retirados antes del arreglo)
+    entran por `size_format`. En una copia de la SQLite local: 1.587 corregidas, 0 `unknown`, 0
+    filas con otros cambios; 63 quedan distintas de `bulk_amount` por el peso escurrido, como es debido.
+  - **Pendiente:** fusionar la PR; antes, ensayarla en `staging` (reiníciala desde producción y
+    ejecuta `init-db` contra ella; ver la PR) y comprobar con la consulta de unidades por día.
 - [ ] **`is_available` marca como no disponible un producto que todavía se vende.**
   - **Situación:** el scraper pone `is_available = false` si viene `unavailable_from`, pero esa
     fecha es futura (3 productos, entre el 24 y el 27 de octubre): el producto deja de venderse a
