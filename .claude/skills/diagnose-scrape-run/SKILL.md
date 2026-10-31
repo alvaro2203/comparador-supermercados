@@ -33,8 +33,9 @@ Work from `scraper/`. Defaults: all supermarkets, today's date (Europe/Madrid).
 ## 3. Fix API drift
 
 1. Ask the user before contacting the live site. With approval, fetch one sample of the failing
-   endpoint with `curl -sS` into `.captures/<code>/` (git-ignored), or delegate to the
-   `supermarket-api-researcher` agent for larger changes.
+   endpoint with `curl -sS -A "supermarket-scraper/0.1 (+price comparison research)"` into
+   `.captures/<code>/` (git-ignored), or delegate to the `supermarket-api-researcher` agent for
+   larger changes. Never put personal data (the user's email, name, git identity) in the request.
 2. Diff the sample against the Pydantic model in `scrapers/<code>/schemas.py` and the fixture in
    `tests/fixtures/<code>/`.
 3. Update the schema, then the fixture to the new shape, then add a regression test with the new
