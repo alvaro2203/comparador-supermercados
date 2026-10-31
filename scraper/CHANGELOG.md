@@ -1,3 +1,9 @@
+## v0.3.3 (2026-10-31)
+
+### Fix
+
+- **persistence**: count only the price changes each run makes (#8)
+
 ## v0.3.2 (2026-10-31)
 
 ### Fix
