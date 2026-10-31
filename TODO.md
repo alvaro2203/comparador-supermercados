@@ -110,15 +110,17 @@ No hay tareas P0 abiertas.
   - **Hecho (decidido el 31 de octubre):** `is_available` es solo `published`; los dos campos no se
     guardan (README, «Availability»). Sin migración: la primera ejecución con el arreglo sobrescribe
     el indicador, como en los espárragos `69643`, el único producto activo y «no disponible» hoy.
-- [ ] **Varias ejecuciones el mismo día.**
-  - **Situación:** el 23 de octubre hubo 4 ejecuciones. Cada una vuelve a contar los mismos 45
-    cambios contra el día anterior, así que sumar `price_changes` en `history` cuenta de más. Y un
-    producto que desaparece en una ejecución posterior conserva el precio de la anterior: es el
-    caso de la crema K-Skin (`18627`), retirada a las 21:00, que además es el único precio
-    `unknown` del día (lo guardó la ejecución de las 15:51, anterior al arreglo).
-  - **Hacer:** documentarlo en el README («los contadores de una ejecución se refieren al día, no
-    a la ejecución»), o que `report` solo cuente los productos activos al final del día. Con la
-    ejecución diaria programada casi no pasará.
+- [x] **Varias ejecuciones el mismo día.**
+  - **Situación:** el 23 de octubre hubo 4 ejecuciones y el 24, 2; desde la ejecución programada,
+    una al día. `new_products` y `delisted` ya eran de cada ejecución (el 23: 12, 1, 0, 0), pero
+    `price_changes` comparaba siempre con el día anterior y repetía los mismos 45 cambios en cada
+    una, así que sumarlos en `history` contaba de más. Además, 4 precios son de productos que una
+    ejecución posterior del mismo día retiró (`18627` el 23; `27842`, `33053` y `33640` el 24).
+  - **Hecho (decidido el 31 de octubre):** cada ejecución compara con el último precio guardado
+    hasta su día, incluido el que va a sobrescribir: una repetición sin cambios cuenta 0, y todos los
+    contadores de `history` son de su ejecución y se pueden sumar. `report` sigue comparando días.
+    Los 4 precios se quedan: se vieron de verdad, y `report` los da como retirados el día siguiente.
+    Las ejecuciones antiguas no se recalculan (README, «Price changes»).
 
 ## P3 · Funcionalidad nueva
 

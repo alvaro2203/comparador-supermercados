@@ -196,6 +196,13 @@ no column and its downgrade keeps the corrected values.
 a promotion starting or ending first, otherwise a regular increase or decrease. `price_changes`
 is the total; the breakdown tells a temporary discount from a real price move.
 
+A run compares with the latest stored snapshot up to its own day: the first run of a day with the
+previous day, a rerun with the snapshot it is about to overwrite. Every counter in `history` is
+therefore that run's own, and the runs of a day add up; to compare whole days, use `report`. Runs
+recorded before November 2026 repeated the whole day's changes on every rerun (45 four times on
+23 October), so do not add up their `price_changes`. A product delisted by a later run of the same
+day keeps that day's price: it was observed, and `report` lists it as delisted on the next day.
+
 **New arrivals.** `is_new_arrival` is the chain's own "new" badge (Mercadona's product-level
 `is_new_arrival`, which marks products for a few weeks). `first_seen_at` is when this scraper first
 saw the product. They answer different questions; use the one that fits.
@@ -503,7 +510,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 177 tests, ~95% branch coverage
+uv run pytest --cov         # 178 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 

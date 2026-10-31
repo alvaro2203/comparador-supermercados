@@ -285,8 +285,10 @@ class PriceChangeCounts:
 class RunStats:
     """Counters describing what a scrape run changed in the catalog.
 
-    ``price_change_kinds`` breaks ``price_changes`` down by kind. It is ``None`` for
-    runs recorded before the breakdown existed, which never had it.
+    Every counter is this run's own, so the runs of a day add up: a rerun on the same
+    day counts only the products and prices it changed. ``price_change_kinds`` breaks
+    ``price_changes`` down by kind. It is ``None`` for runs recorded before the
+    breakdown existed, which never had it.
     """
 
     categories: int = 0

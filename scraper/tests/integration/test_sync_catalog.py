@@ -116,6 +116,42 @@ async def test_daily_runs_build_price_history_and_detect_changes(
     assert len(oil_price(engine)) == 2
 
 
+async def test_rerun_on_the_same_day_counts_only_what_it_changed(
+    make_scraper: Callable[[], MercadonaScraper],
+    uow_factory: Callable[[], UnitOfWork],
+    clock: FixedClock,
+    engine: Engine,
+    fake_api: FakeApi,
+) -> None:
+    use_case = SyncCatalogUseCase(uow_factory, clock, SyncOptions(fetch_details=False))
+    async with make_scraper() as source:
+        await use_case.execute(source)
+    clock.advance()
+    page = cast("Page", fake_api.responses["/api/categories/112/"])
+    instructions = cast(
+        "dict[str, object]", page["categories"][0]["products"][0]["price_instructions"]
+    )
+    instructions.update(unit_price="9.45", price_decreased=False, previous_unit_price=None)
+    async with make_scraper() as source:
+        morning = await use_case.execute(source)
+
+    async with make_scraper() as source:
+        unchanged = await use_case.execute(source)
+    instructions.update(unit_price="9.95")
+    async with make_scraper() as source:
+        evening = await use_case.execute(source)
+
+    assert morning.run.stats.price_change_kinds == PriceChangeCounts(promotions_ended=1)
+    assert unchanged.run.stats.price_changes == 0
+    assert unchanged.run.stats.price_change_kinds == PriceChangeCounts()
+    assert evening.run.stats.price_changes == 1
+    assert evening.run.stats.price_change_kinds == PriceChangeCounts(increased=1)
+    assert oil_price(engine) == [
+        ("2026-10-01", Decimal("8.9500")),
+        ("2026-10-02", Decimal("9.9500")),
+    ]
+
+
 async def test_vanished_products_are_delisted_and_come_back(
     make_scraper: Callable[[], MercadonaScraper],
     uow_factory: Callable[[], UnitOfWork],
