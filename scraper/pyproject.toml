@@ -1,6 +1,6 @@
 [project]
 name = "supermarket-scraper"
-version = "0.3.1"
+version = "0.3.2"
 description = "Daily catalog and price downloader for Spanish supermarkets (Mercadona first)."
 readme = "README.md"
 requires-python = ">=3.12"

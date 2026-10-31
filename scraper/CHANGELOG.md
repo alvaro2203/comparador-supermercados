@@ -1,3 +1,9 @@
+## v0.3.2 (2026-10-31)
+
+### Fix
+
+- **mercadona**: treat delivery restrictions as available (#7)
+
 ## v0.3.1 (2026-10-31)
 
 ### Fix
