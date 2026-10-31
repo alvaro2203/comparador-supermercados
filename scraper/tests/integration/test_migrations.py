@@ -108,9 +108,8 @@ def insert_price_history(connection: Connection) -> None:
             updated_at=SEEN_AT,
         )
     )
-    connection.execute(
+    product_key = connection.execute(
         products.insert().values(
-            id=1,
             supermarket_code="mercadona",
             external_id="4241",
             name="Leche entera",
@@ -118,10 +117,11 @@ def insert_price_history(connection: Connection) -> None:
             first_seen_at=SEEN_AT,
             last_seen_at=SEEN_AT,
         )
-    )
+    ).inserted_primary_key
+    assert product_key is not None
     connection.execute(
         price_snapshots.insert().values(
-            product_id=1,
+            product_id=product_key[0],
             captured_on=date(2026, 10, 1),
             captured_at=SEEN_AT,
             currency="EUR",
