@@ -33,6 +33,9 @@ paths:
 - Mercadona's VAT is `price_instructions.tax_percentage` (`"10.000"`), present on every product.
   `iva` is null on about three quarters of them and is only a fallback (`PriceInstructions.vat_rate`).
   VAT stays optional: a product without either is stored with `vat_rate` NULL, not rejected.
+- Mercadona's `is_available` is the product's `published` flag only. `unavailable_from` (an instant,
+  `2026-10-27T23:00:00+00:00`) and `unavailable_weekdays` (1 = Monday) restrict online delivery
+  dates, not the sale; the product leaves the listing before that instant. Do not map them.
 - The base class isolates pages and products by catching `DomainError` only. Expected data
   problems must raise a `DomainError` subclass; anything else is a bug and should fail loudly.
 

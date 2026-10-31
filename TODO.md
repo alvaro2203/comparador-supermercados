@@ -100,13 +100,16 @@ No hay tareas P0 abiertas.
     filas con otros cambios; 63 quedan distintas de `bulk_amount` por el peso escurrido, como es debido.
   - **Pendiente:** fusionar la PR; antes, ensayarla en `staging` (reiníciala desde producción y
     ejecuta `init-db` contra ella; ver la PR) y comprobar con la consulta de unidades por día.
-- [ ] **`is_available` marca como no disponible un producto que todavía se vende.**
-  - **Situación:** el scraper pone `is_available = false` si viene `unavailable_from`, pero esa
-    fecha es futura (3 productos, entre el 24 y el 27 de octubre): el producto deja de venderse a
-    partir de ese día. Además, `unavailable_weekdays` (7 productos que no se venden algunos días
-    de la semana) no se guarda.
-  - **Hacer:** decidir si `is_available` compara `unavailable_from` con el momento de la captura,
-    y si merece la pena guardar las dos cosas. Poco urgente: afecta a 10 productos.
+- [x] **`is_available` marca como no disponible un producto que todavía se vende.**
+  - **Situación:** el scraper ponía `is_available = false` si venía `unavailable_from`. Medido en
+    producción el 31 de octubre: es un instante (`2026-10-27T23:00:00+00:00`, medianoche en Madrid)
+    que limita las fechas de entrega de la tienda online, no la venta. Los tres productos con fecha
+    (melocotón, lima y mandarinas) salieron del catálogo en la ejecución del día anterior a esa fecha
+    y `delist` ya los marcó. `unavailable_weekdays` son días sin reparto (1 = lunes: pescado fresco
+    los lunes, marisco de lunes a jueves), y esos 7 productos tienen precio todos los días.
+  - **Hecho (decidido el 31 de octubre):** `is_available` es solo `published`; los dos campos no se
+    guardan (README, «Availability»). Sin migración: la primera ejecución con el arreglo sobrescribe
+    el indicador, como en los espárragos `69643`, el único producto activo y «no disponible» hoy.
 - [ ] **Varias ejecuciones el mismo día.**
   - **Situación:** el 23 de octubre hubo 4 ejecuciones. Cada una vuelve a contar los mismos 45
     cambios contra el día anterior, así que sumar `price_changes` en `history` cuenta de más. Y un

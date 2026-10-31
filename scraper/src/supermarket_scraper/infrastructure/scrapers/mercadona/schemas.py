@@ -96,7 +96,12 @@ class PriceInstructions(MercadonaModel):
 
 
 class ListedProduct(MercadonaModel):
-    """Product entry as it appears inside a category page."""
+    """Product entry as it appears inside a category page.
+
+    ``unavailable_from`` and ``unavailable_weekdays`` are left out on purpose: they limit the
+    online shop's delivery dates, not the sale. A product stops being listed before its
+    ``unavailable_from``, and a delisted product is already flagged by the sync.
+    """
 
     id: str
     display_name: str
@@ -106,7 +111,6 @@ class ListedProduct(MercadonaModel):
     is_new_arrival: bool
     share_url: OptionalText = None
     thumbnail: OptionalText = None
-    unavailable_from: OptionalText = None
     price_instructions: PriceInstructions
 
 

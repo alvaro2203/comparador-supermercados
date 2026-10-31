@@ -202,7 +202,7 @@ class MercadonaScraper(
             category_external_ids=(category_external_id,),
             thumbnail_url=raw.thumbnail,
             share_url=raw.share_url,
-            is_available=raw.published and raw.unavailable_from is None,
+            is_available=raw.published,
             is_new_arrival=raw.is_new_arrival,
         )
         is_promotion = pricing.price_decreased or (

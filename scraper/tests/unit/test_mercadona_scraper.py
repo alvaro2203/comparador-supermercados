@@ -48,7 +48,7 @@ async def test_fetch_catalog_normalizes_tree_products_and_prices(
     assert salt.price.vat_rate == Decimal(10)
     assert salt.product.packaging.is_pack
     assert salt.product.packaging.total_units == 2
-    assert not listings["15061"].product.is_available
+    assert listings["15061"].product.is_available
 
     for request in fake_api.calls:
         assert request.url.params["wh"] == "vlc1"
@@ -132,6 +132,21 @@ async def test_product_without_its_new_arrival_flag_is_schema_drift(
     assert len(snapshot.failures) == 1
     assert "is_new_arrival" in snapshot.failures[0].reason
     assert "15061" not in {item.product.external_id for item in snapshot.listings}
+
+
+async def test_unpublished_product_is_listed_as_unavailable(
+    make_scraper: Callable[[], MercadonaScraper], fake_api: FakeApi
+) -> None:
+    page = cast(
+        "dict[str, list[dict[str, list[dict[str, object]]]]]",
+        fake_api.responses["/api/categories/115/"],
+    )
+    page["categories"][0]["products"][0]["published"] = False
+    async with make_scraper() as scraper:
+        snapshot = await scraper.fetch_catalog()
+
+    listings = {item.product.external_id: item for item in snapshot.deduplicated_listings()}
+    assert not listings["15061"].product.is_available
 
 
 @pytest.mark.parametrize(
