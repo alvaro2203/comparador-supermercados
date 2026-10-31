@@ -205,6 +205,13 @@ product carries; the older `iva` field is null on about three quarters of them a
 fallback. Snapshots stored before that was fixed (from 18 October 2026 until the first run with the
 fix) lack VAT on ~73 % of rows unless they were backfilled; prices include VAT either way.
 
+**Availability.** `is_available` is false only for a product the chain lists as unpublished, or one
+that was delisted. Mercadona's `unavailable_from` and `unavailable_weekdays` are not stored: they
+limit the online shop's delivery dates (fresh fish is not delivered on Mondays), not the sale, and a
+product stops being listed before its `unavailable_from`, which the sync records as delisting.
+Before November 2026 a product with a date in `unavailable_from` was wrongly stored as unavailable;
+the first run with the fix overwrites the flag, since `is_available` is updated on every upsert.
+
 **Product labels.** Many products share a name and differ only in presentation (262 names, 631
 Mercadona products). Any listing must show `Product.label`, the name plus
 `PackagingInfo.describe()`: "Aceite de oliva virgen extra Hacendado (Garrafa 5 l)",
@@ -496,7 +503,7 @@ rendering), implement the smaller `CatalogSource` port directly. The use case on
 uv run ruff format .        # formatting
 uv run ruff check .         # lint: every Ruff rule enabled (select = ["ALL"])
 uv run mypy                 # mypy --strict + extra error codes, over src and tests
-uv run pytest --cov         # 176 tests, ~95% branch coverage
+uv run pytest --cov         # 177 tests, ~95% branch coverage
 uv run pre-commit install   # format, lint and mypy on every commit, plus the commit message check
 ```
 

@@ -16,7 +16,8 @@
           "thumbnail": "https://prod-mercadona.imgix.net/images/15061.jpg",
           "is_new_arrival": false,
           "display_name": "Pimienta negra molida Hacendado",
-          "unavailable_from": "2026-10-20",
+          "unavailable_from": "2026-10-27T23:00:00+00:00",
+          "unavailable_weekdays": [1],
           "price_instructions": {
             "iva": 10,
             "tax_percentage": "10.000",
